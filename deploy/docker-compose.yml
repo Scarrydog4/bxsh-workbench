@@ -1,0 +1,67 @@
+# 笔下生花工作台：app + postgres + caddy。所有密钥在同目录 .env（不进仓库）。
+# 首次部署见 deploy/部署说明.md
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bxsh
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in deploy/.env}
+      POSTGRES_DB: workbench
+    # 小型部署的保守配置；按服务器资源调整。
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "effective_cache_size=768MB", "-c", "max_connections=40", "-c", "work_mem=8MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bxsh -d workbench"]
+      interval: 10s
+      retries: 10
+
+  app:
+    build: { context: ../web, target: runner }
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgres://bxsh:${DB_PASSWORD:?Set DB_PASSWORD in deploy/.env}@db:5432/workbench
+      # 工资归期、日期都按北京时间算
+      TZ: Asia/Shanghai
+      STORAGE_DIR: /data/storage
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      YCJG_TOKEN: ${YCJG_TOKEN:-}
+    volumes:
+      - files:/data/storage
+    expose: ["3100"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      APP_HOST: ${APP_HOST:-localhost}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # 维护工具：docker compose --profile tools run --rm tools db:migrate
+  tools:
+    profiles: ["tools"]
+    build: { context: ../web, target: tools }
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgres://bxsh:${DB_PASSWORD:?Set DB_PASSWORD in deploy/.env}@db:5432/workbench
+      # 工资归期、日期都按北京时间算
+      TZ: Asia/Shanghai
+      # 迁移旧反馈要读附件卷里的截图，路径必须和 app 容器一致
+      STORAGE_DIR: /data/storage
+    volumes:
+      # 导入文件和初始账号文件都在仓库外的 data/ 目录
+      - ../data:/data
+      - files:/data/storage
+
+volumes:
+  pgdata:
+  files:
+  caddy_data:
+  caddy_config:

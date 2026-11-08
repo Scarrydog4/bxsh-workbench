@@ -1,0 +1,9 @@
+{
+  "name": "bxsh-wecom-callback",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": { "start": "node server.mjs", "test": "node --test test/*.test.mjs", "status": "node status.mjs" },
+  "dependencies": { "@wecom/crypto": "1.0.1", "fast-xml-parser": "5.11.2" }
+}

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="350" viewBox="0 0 720 350">
+<rect x="0" y="0" width="720" height="350" rx="0" fill="#ede7d4"/>
+<text x="32" y="47" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#494932">Urban Mobility</text>
+<text x="32" y="77" font-family="Arial, sans-serif" font-size="16" font-weight="500" fill="#64664a">城市出行 · 空间分布</text>
+<defs>
+<clipPath id="map">
+<rect width="648" height="225" rx="6"/>
+</clipPath>
+</defs>
+<g transform="translate(36 98)" clip-path="url(#map)">
+<rect x="0" y="0" width="648" height="225" rx="6" fill="#f5f1e1"/>
+<path d="M-130 0 L10 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M-85 0 L55 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M-40 0 L100 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M5 0 L145 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M50 0 L190 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M95 0 L235 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M140 0 L280 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M185 0 L325 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M230 0 L370 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M275 0 L415 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M320 0 L460 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M365 0 L505 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M410 0 L550 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M455 0 L595 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M500 0 L640 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M545 0 L685 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M590 0 L730 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M635 0 L775 225" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 -60 L648 -130" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 -18 L648 -88" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 24 L648 -46" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 66 L648 -4" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 108 L648 38" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 150 L648 80" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 192 L648 122" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M0 234 L648 164" fill="none" stroke="#d6d5bf" stroke-width="5" stroke-linejoin="round"/>
+<path d="M-2 172 Q100 74 202 143 T394 116 T648 53" fill="none" stroke="#a3bdaf" stroke-width="16" stroke-linejoin="round"/>
+<circle cx="94" cy="140" r="14" fill="#e7b871"/>
+<circle cx="94" cy="140" r="6.3" fill="#a36335"/>
+<circle cx="199" cy="101" r="20" fill="#e7b871"/>
+<circle cx="199" cy="101" r="9.0" fill="#a36335"/>
+<circle cx="312" cy="130" r="27" fill="#e7b871"/>
+<circle cx="312" cy="130" r="12.15" fill="#a36335"/>
+<circle cx="408" cy="71" r="12" fill="#e7b871"/>
+<circle cx="408" cy="71" r="5.4" fill="#a36335"/>
+<circle cx="527" cy="120" r="22" fill="#e7b871"/>
+<circle cx="527" cy="120" r="9.9" fill="#a36335"/>
+<circle cx="570" cy="55" r="12" fill="#e7b871"/>
+<circle cx="570" cy="55" r="5.4" fill="#a36335"/>
+</g>
+</svg>

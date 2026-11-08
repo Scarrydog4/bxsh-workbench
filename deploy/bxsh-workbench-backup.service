@@ -1,0 +1,11 @@
+[Unit]
+Description=Bxsh workbench database and file backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/bxsh-workbench/deploy
+ExecStart=/opt/bxsh-workbench/deploy/backup.sh
+UMask=0077
+TimeoutStartSec=1200

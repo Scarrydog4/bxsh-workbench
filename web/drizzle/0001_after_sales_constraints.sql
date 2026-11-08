@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "after_sales_round_idx" ON "after_sales" USING btree ("order_id","round");--> statement-breakpoint
+CREATE UNIQUE INDEX "after_sales_open_idx" ON "after_sales" USING btree ("order_id") WHERE "after_sales"."done_at" is null;

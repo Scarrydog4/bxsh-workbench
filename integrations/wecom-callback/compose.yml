@@ -1,0 +1,28 @@
+services:
+  wecom-callback:
+    build: .
+    restart: unless-stopped
+    env_file: /opt/bxsh-workbench/private/wecom-callback.env
+    volumes:
+      - /opt/bxsh-workbench/private/wecom-callback-data:/data
+    networks:
+      workbench:
+        aliases: [wecom-callback]
+    expose: ["3106"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3106/api/wecom/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  workbench:
+    external: true
+    name: deploy_default

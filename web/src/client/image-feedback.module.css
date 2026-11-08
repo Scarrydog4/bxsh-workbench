@@ -1,0 +1,22 @@
+.receiver {
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.received {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.18);
+}
+
+.arrival {
+  animation: image-arrival 180ms ease-out;
+}
+
+@keyframes image-arrival {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receiver { transition: none; }
+  .arrival { animation: none; }
+}

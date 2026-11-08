@@ -1,0 +1,25 @@
+[Unit]
+Description=WeCom conversation archive and media collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/opt/bxsh-workbench/integrations/wecom-archive
+ExecStart=/usr/bin/python3 -u archive.py --config /opt/bxsh-workbench/private/wecom-archive/config.json run
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/bxsh-workbench/private/wecom-archive/data
+ReadOnlyPaths=/opt/bxsh-workbench/private/wecom-archive/keys
+CapabilityBoundingSet=
+MemoryMax=256M
+CPUQuota=40%
+
+[Install]
+WantedBy=multi-user.target

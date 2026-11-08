@@ -1,0 +1,37 @@
+/* Keep feedback on the changed control, never on table rows or their scroll layer. */
+.reveal {
+  animation: filter-reveal 180ms ease-out;
+}
+
+.mark {
+  flex-shrink: 0;
+  opacity: 0;
+  transform: scale(.8);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.choice[aria-pressed='true'] .mark {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.turn {
+  transition: transform 180ms ease-out;
+}
+
+.selection[data-selected='true'] {
+  animation: filter-reveal 180ms ease-out;
+}
+
+@keyframes filter-reveal {
+  from { opacity: .5; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .selection[data-selected='true'] { animation: none; }
+  .mark,
+  .turn { transition: none; }
+  .mark { transform: none; }
+}

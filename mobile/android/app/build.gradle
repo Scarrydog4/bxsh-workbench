@@ -1,0 +1,15 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.bxsh.workbench'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.bxsh.workbench'
+        minSdk 26
+        targetSdk 35
+        versionCode 7
+        versionName '0.1.6'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildTypes { release { debuggable false; minifyEnabled false } }
+}
+dependencies { implementation 'androidx.core:core:1.15.0' }

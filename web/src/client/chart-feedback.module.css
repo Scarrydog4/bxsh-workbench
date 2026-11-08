@@ -1,0 +1,11 @@
+.appear { animation: chart-reading-in 180ms ease-out; }
+.marker { transition: opacity 180ms ease-out, fill 180ms ease-out, stroke 180ms ease-out; }
+/* Keep the existing Radix portal/positioning, without scaling the amount text. */
+.readout { animation: chart-reading-in 180ms ease-out !important; }
+.readout[data-state="closed"] { animation: chart-reading-out 150ms ease-in !important; }
+@keyframes chart-reading-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes chart-reading-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .appear, .readout, .readout[data-state="closed"] { animation: none !important; }
+  .marker { transition: none; }
+}
