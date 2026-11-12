@@ -12,7 +12,8 @@ import { DateField } from './DatePicker'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
-import { CaretDown, CheckCircle, CircleNotch, ImageSquare, Lightning, WarningCircle, X } from '@phosphor-icons/react'
+import { CaretDown, CheckCircle, CircleNotch, ImageSquare, Lightning, Star, UserSwitch, WarningCircle, X } from '@phosphor-icons/react'
+import { Tip } from './Tip'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, useAppDialogDismiss } from '@/components/ui/app-dialog'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -20,13 +21,14 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { Avatar, ChannelAvatar, Combobox, Field, inputCls, type Option } from './ui'
-import { addPayment, createChannel, createOrder, salesPeople, uploadFiles, useSession } from './store'
+import { addPayment, createChannel, createOrder, salesPeople, setOrderImportance, uploadFiles, useSession } from './store'
 import { Thumbs } from './ImageViewer'
 import { IMAGE_INPUT_EMPTY_MESSAGE, imageFilesFromTransfer } from './image-input'
 import type { ActionResult } from './operation-feedback'
 import { imageArrivalClass, useImageReceiveFeedback } from './useImageReceiveFeedback'
 import { CopyOrderName } from './CopyOrderName'
 import { orderShareName, orderShareText } from '@/shared/order-share-text'
+import { ORDER_LEVELS, withOrderLevel, type OrderLevel } from '@/shared/order-level'
 
 async function dataUrlToFile(src: string, base: string) {
   const b = await (await fetch(src)).blob()
@@ -43,6 +45,32 @@ type SavedEntry = { id: string; actorId: string; text: string }
 const startsWithNumber = (title: string, number: string) => title === number || title.startsWith(`${number} `)
 const hasOrderNumber = (title: string) => /^[a-z]{1,12}\d{6,}/i.test(title.trim().replace(/^待定\s*/, ''))
 
+/**
+ * 回车依次走过这些位置：层次 → 订单名称 → 渠道 → 销售额 → 已收 → 截止 → 保存按钮。
+ * 停在保存按钮上再按一次回车才保存；⇧回车回到上一项；⌘/Ctrl+回车随时直接保存。
+ * 写手工资、渠道单号这类不在这条路上的输入框，回车跳到它后面最近的一站。
+ */
+const ENTER_STOPS = ['q-level', 'q-title', 'q-channel', 'q-price', 'q-paid', 'q-due', 'q-save']
+function enterStops() {
+  return ENTER_STOPS.map(id => document.getElementById(id)).filter((el): el is HTMLElement => !!el && !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0)
+}
+function focusPrice() {
+  if (typeof document === 'undefined') return
+  const price = document.getElementById('q-price') as HTMLInputElement | null
+  price?.focus()
+  price?.select()
+}
+function focusStep(from: HTMLElement, dir: 1 | -1) {
+  const list = enterStops()
+  const at = list.indexOf(from)
+  const next = at >= 0 ? list[at + dir]
+    : dir > 0 ? list.find(el => from.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+      : [...list].reverse().find(el => from.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING)
+  if (!next) return
+  next.focus()
+  if (next instanceof HTMLInputElement) next.select()
+}
+
 interface Row {
   userId: string
   rate?: string | null
@@ -52,11 +80,14 @@ interface Row {
 function blank(ownerId: string, writerId: string, salesMode: SalesMode = 'commission') {
   return {
     title: '',
+    level: '' as OrderLevel,
     suggestedNumber: undefined as string | undefined,
     numberOwnerId: undefined as string | undefined,
     numberDate: undefined as string | undefined,
     urgent: false,
     urgencyNote: '',
+    important: false,
+    importanceNote: '',
     channelId: '',
     ownerId,
     salesMode,
@@ -83,6 +114,7 @@ function Chip({ children, onClick, title }: { children: React.ReactNode; onClick
 }
 
 export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onOpenChange: (v: boolean) => void; prefill?: Prefill | null }) {
+  const [inquiryId,setInquiryId] = useState<string>()
   const { s, me, can, adminIds, views, role } = useSession()
   const admin = role.locked
   const pickWriter = can('order.edit')
@@ -122,6 +154,10 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
   const remainingFiles = useRef<File[] | null>(null)
   const pendingPayment = useRef<Parameters<typeof addPayment>[1][] | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
+  const levelRef = useRef<HTMLDivElement>(null)
+  /** 选完渠道后焦点直接去销售额，按 Esc 关掉选择框时不跳 */
+  const advanceAfterChannel = useRef(false)
+  const saveWhenReady = useRef(false)
   const formRef = useRef<HTMLFormElement>(null)
   const [feedback, setFeedback] = useState<EntryFeedback>({ status: 'idle', message: '' })
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -135,7 +171,15 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
   const receiptVisible = useRef(false)
   const hasManualNumber = !f.suggestedNumber && hasOrderNumber(f.title)
   const numberRefreshing = (!!f.suggestedNumber && (f.numberOwnerId !== f.ownerId || f.numberDate !== f.orderDate)) || (numberHintStatus === 'loading' && !hasManualNumber)
-  const suggestedName = orderShareName({ title: f.title, type: f.type, pending: f.salesMode !== 'cost' && can('payment.create') && !(Number(f.paidAmount) > 0) })
+  useEffect(() => { if (!open) saveWhenReady.current = false }, [open])
+  // 取号期间按了保存：单号一到就接着保存（save 在下面定义，调用时已就绪）
+  useEffect(() => {
+    if (numberRefreshing || !saveWhenReady.current) return
+    saveWhenReady.current = false
+    void save()
+  }, [numberRefreshing]) // eslint-disable-line react-hooks/exhaustive-deps
+  const levelTitle = withOrderLevel(f.title, f.level)
+  const suggestedName = orderShareName({ title: levelTitle, type: f.type, pending: f.salesMode !== 'cost' && can('payment.create') && !(Number(f.paidAmount) > 0) })
   const savedEntry = lastSavedEntry?.actorId === me.id ? lastSavedEntry : null
   function clearTimers() {
     if (successTimer.current !== null) clearTimeout(successTimer.current)
@@ -195,6 +239,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
       createdRef.current = null
       remainingFiles.current = null
       pendingPayment.current = null
+      setInquiryId(prefill?.inquiryId)
       if (prefill) apply(prefill)
       scrollTimer.current = setTimeout(() => { scrollTimer.current = null; formRef.current?.scrollTo(0, 0) }, 60)
     }
@@ -285,13 +330,26 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
 
   const set = <K extends keyof ReturnType<typeof blank>>(k: K, v: ReturnType<typeof blank>[K]) => setF((x) => ({ ...x, [k]: v }))
 
+  // 代录：销售替暂停接单（头像变灰）的同事录单，用那个人的渠道，代录费按实收 5% 从他提成里扣给自己
+  const proxyTargets = admin ? [] : s.users.filter(u => u.isSales && !u.isAdmin && u.active !== false && !!u.pausedAt && u.id !== me.id)
+  const proxying = !admin && f.ownerId !== me.id
+  const channelPool = useMemo(() => proxying ? (s.proxyChannels ?? []).filter(c => c.ownerId === f.ownerId) : s.channels, [proxying, s.proxyChannels, s.channels, f.ownerId])
   const channelOpts: Option[] = useMemo(
     () =>
-      s.channels.map((c) => ({ value: c.id, label: c.name, hint: s.users.find((u) => u.id === c.ownerId)?.name, icon: <ChannelAvatar channel={c} size={18} /> })),
-    [s.channels, s.users],
+      channelPool.map((c) => ({ value: c.id, label: c.name, hint: s.users.find((u) => u.id === c.ownerId)?.name, icon: <ChannelAvatar channel={c} size={18} /> })),
+    [channelPool, s.users],
   )
   const typeOpts: Option[] = s.types.map((t) => ({ value: t, label: t }))
-  const selectedChannel = s.channels.find(c => c.id === f.channelId)
+  const selectedChannel = channelPool.find(c => c.id === f.channelId)
+  const owner = s.users.find(u => u.id === f.ownerId) ?? me
+  function chooseProxy(ownerId: string) {
+    setF(x => {
+      if (ownerId === x.ownerId) return x
+      const salesMode = s.users.find(u => u.id === ownerId)?.salesMode ?? 'commission'
+      return { ...x, ownerId, channelId: '', salesMode, ...(salesMode !== x.salesMode ? { basePrice: '', paidAmount: '', paidNote: '', paidProof: undefined } : {}) }
+    })
+    setOwnerOpen(false)
+  }
   // A generated prefix is a starting point, not an entered order name. A
   // manually supplied number has no suggestedNumber and keeps its old meaning.
   const enteredTitle = f.suggestedNumber && startsWithNumber(f.title, f.suggestedNumber)
@@ -307,7 +365,8 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
   async function save() {
     if(readingPayment || shotsReading.current)return
     if (submitting.current) return
-    if (numberRefreshing) { toast('正在更新建议单号，请稍候'); return }
+    // 选完渠道、改了归属或日期会重新拿单号：这时按保存先记下，单号回来自动保存，回车不会被吞掉
+    if (numberRefreshing) { saveWhenReady.current = true; setFeedback({ status: 'saving', message: '正在获取单号，拿到后自动保存' }); return }
     setTried(true)
     if (invalid) {
       toast.error(f.salesMode === 'cost' ? '请填写订单名称和销售应付底价' : '请填写订单名称、渠道和销售额')
@@ -343,13 +402,15 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
     try {
       if (!createdRef.current) setFeedback({ status: 'saving', message: '正在创建订单' })
       const o = createdRef.current ?? await createOrder({
-        title: f.title,
+        title: levelTitle,
+        inquiryId,
         ...(f.suggestedNumber ? { suggestedNumber: f.suggestedNumber } : {}),
         urgent: f.urgent,
         urgencyNote: f.urgencyNote,
         orderDate: f.orderDate,
         dueDate: f.dueDate || deadlineFrom(f.orderDate),
         ownerId: f.ownerId,
+        ...(proxying ? { proxy: true } : {}),
         channelId: f.salesMode === 'cost' ? '' : f.channelId,
         salesMode: f.salesMode,
         channelNo: f.channelNo,
@@ -364,8 +425,16 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
         return
       }
       createdRef.current = o
+      if(inquiryId) window.dispatchEvent(new CustomEvent('bxsh:inquiry-converted',{detail:{id:inquiryId,orderId:o.id}}))
+      setInquiryId(undefined)
       setCreated(o)
       if (o.title) setF(current => ({ ...current, title: o.title!, suggestedNumber: undefined, numberOwnerId: undefined, numberDate: undefined }))
+      // 建单接口不带「重要」，建好后沿用订单里星标的同一个操作（会通知写手）；重复保存时同样的说明不会重复记录
+      if (f.important) {
+        const marked = await setOrderImportance(o.id, true, f.importanceNote.trim())
+        if (!mounted.current) return
+        if (!marked) toast.error('订单已保存，但「重要」没标上，请在订单里点一下星标')
+      }
       pendingPayment.current ??= can('payment.create') && Number(f.paidAmount) > 0
         ? [{ amount: Number(f.paidAmount), date: iso(today()), tag: f.paymentTag, note: f.paidNote.trim(), proof: f.paidProof }] : []
       if (pendingPayment.current.length) {
@@ -400,7 +469,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
       }
       setFeedback({ status: 'success', message: '已完成，订单及填写的收款、截图均已保存' })
       markFresh([o.id])
-      const shareText = orderShareText({ title: o.title ?? f.title.trim(), type: f.type, total: parseMoneyInput(f.basePrice) ?? null, paid: can('payment.create') ? Number(f.paidAmount) || 0 : null, paymentTag: f.paymentTag, salesMode: f.salesMode })
+      const shareText = orderShareText({ title: o.title ?? levelTitle, type: f.type, total: parseMoneyInput(f.basePrice) ?? null, paid: can('payment.create') ? Number(f.paidAmount) || 0 : null, paymentTag: f.paymentTag, salesMode: f.salesMode })
       setLastSavedEntry({ id: o.id, actorId: me.id, text: shareText })
       receiptVisible.current = true
       setReceiptOpen(true)
@@ -420,7 +489,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
           setTried(false)
           setCount((c) => c + 1)
           setFeedback({ status: 'idle', message: '' })
-          if (!receiptVisible.current) focusFrame.current = requestAnimationFrame(() => { focusFrame.current = null; titleRef.current?.focus() })
+          if (!receiptVisible.current) focusFrame.current = requestAnimationFrame(() => { focusFrame.current = null; levelRef.current?.focus() })
         } else onOpenChange(false)
       }, 800)
     } catch {
@@ -450,10 +519,22 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
         onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
         onDrop={e => { e.preventDefault(); e.stopPropagation(); void addShots(imageFilesFromTransfer(e.dataTransfer)) }}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          if (e.key !== 'Enter' || e.altKey || e.nativeEvent.isComposing || e.keyCode === 229) return
+          if (e.metaKey || e.ctrlKey) {
             e.preventDefault()
             save()
+            return
           }
+          const el = e.target as HTMLElement
+          // 多行备注换行；渠道、日期等弹出的选择框自己处理回车；停在保存按钮上的回车就是点保存
+          if (el.tagName === 'TEXTAREA' || el.closest('[data-radix-popper-content-wrapper]') || el.id === 'q-save') return
+          // 还没选渠道时，回车打开渠道选择
+          if (el.id === 'q-channel' && !f.channelId && !e.shiftKey) return
+          // 其他按钮（加急、常用价、更多信息）保持原来的点击
+          if (el.tagName === 'BUTTON' && !ENTER_STOPS.includes(el.id)) return
+          if (el.tagName !== 'INPUT' && !ENTER_STOPS.includes(el.id)) return
+          e.preventDefault()
+          focusStep(el, e.shiftKey ? -1 : 1)
         }}
       >
         <AppDialogHeader className="flex items-center justify-between py-3.5">
@@ -461,13 +542,44 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
             <DialogTitle className="text-base">录单</DialogTitle>
             <DialogDescription className="sr-only">新增订单</DialogDescription>
           </div>
+          <div className="mr-6 flex items-center gap-3">
           <AnimatePresence>
             {count > 0 && (
-              <motion.span initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mr-6 rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">
+              <motion.span initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">
                 本次已录 <span className="num">{count}</span> 单
               </motion.span>
             )}
           </AnimatePresence>
+          {/* 归属销售默认就是录单人，很少改：放在标题栏边上，不占表单位置、不进回车顺序 */}
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>归属</span>
+            {admin ? <Popover open={ownerOpen} onOpenChange={setOwnerOpen}>
+              <PopoverTrigger asChild><button id="q-owner" type="button" tabIndex={-1} aria-label={`归属销售：${owner.name}，点击更换`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground data-[state=open]:bg-accent">
+                <Avatar user={owner} size={18} />{owner.name}<CaretDown size={10}/>
+              </button></PopoverTrigger>
+              <PopoverContent align="end" className="w-[min(320px,calc(100vw-48px))] p-3">
+                <PersonChoice showSalesMode label="选择归属销售" people={salesPeople(s)} value={f.ownerId} onChange={ownerId => {
+                  setF(x => {
+                    if (ownerId === x.ownerId) return x
+                    const salesMode = s.users.find(u => u.id === ownerId)?.salesMode ?? 'commission'
+                    return { ...x, ownerId, salesMode, ...(salesMode !== x.salesMode ? { basePrice: '', paidAmount: '', paidNote: '', paidProof: undefined } : {}) }
+                  })
+                  setOwnerOpen(false)
+                }}/>
+              </PopoverContent>
+            </Popover> : <span className="inline-flex items-center gap-1 px-1.5 py-1"><Avatar user={owner} size={18} />{owner.name}</span>}
+            {/* 代录：替暂停接单（头像变灰）的同事录，用他的渠道，代录费按实收 5% 从他提成里分给自己 */}
+            {proxying && <Tip label="代录：按实收 5% 从他提成里分给你"><span className="rounded bg-primary/10 px-1.5 leading-5 text-primary">代录</span></Tip>}
+            {!admin && (proxying
+              ? <Tip label="不代录"><button type="button" tabIndex={-1} aria-label="不代录" className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent hover:text-foreground" onClick={() => chooseProxy(me.id)}><X size={13}/></button></Tip>
+              : !!proxyTargets.length && <Popover open={ownerOpen} onOpenChange={setOwnerOpen}>
+                <Tip label="替暂停的同事代录"><PopoverTrigger asChild><button type="button" tabIndex={-1} aria-label="替暂停的同事代录" className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent hover:text-foreground data-[state=open]:bg-accent"><UserSwitch size={16}/></button></PopoverTrigger></Tip>
+                <PopoverContent align="end" className="w-[min(320px,calc(100vw-48px))] p-3">
+                  <PersonChoice label="选择暂停的销售" people={proxyTargets} value={f.ownerId} onChange={chooseProxy}/>
+                </PopoverContent>
+              </Popover>)}
+          </div>
+          </div>
         </AppDialogHeader>
 
         {created && <div className="border-b bg-primary/[0.06] px-5 py-2 text-xs text-primary">{f.title.trim() || '这一单'} 的订单信息已保存。</div>}
@@ -489,12 +601,33 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
               </motion.div>
             )}
           </AnimatePresence>
+          <div className="col-span-2 flex flex-wrap items-center gap-2">
+            <span id="q-level-label" className="text-xs font-medium text-muted-foreground">层次</span>
+            {/* 先选层次：按 Z 专科、B 本科、N 不标，选完自动跳到订单名称；回车保持当前选择 */}
+            <div id="q-level" ref={levelRef} role="radiogroup" aria-labelledby="q-level-label" tabIndex={0} autoFocus
+              onKeyDown={(e) => {
+                const k = e.key.toLowerCase()
+                const hit = ORDER_LEVELS.find(l => l.keys.includes(k))
+                const at = ORDER_LEVELS.findIndex(l => l.value === f.level)
+                if (hit && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); set('level', hit.value); titleRef.current?.focus(); return }
+                if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); set('level', ORDER_LEVELS[(at + (e.key === 'ArrowRight' ? 1 : ORDER_LEVELS.length - 1)) % ORDER_LEVELS.length].value) }
+              }}
+              className="inline-flex rounded-lg border p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+              {ORDER_LEVELS.map(l => (
+                <button key={l.label} type="button" role="radio" aria-checked={f.level === l.value} tabIndex={-1}
+                  onClick={() => { set('level', l.value); titleRef.current?.focus() }}
+                  className={cn('inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors', f.level === l.value ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                  {l.label}<span className="kbd hidden sm:inline">{l.keys[0].toUpperCase()}</span>
+                </button>
+              ))}
+            </div>
+            {f.level && <span className="text-xs text-muted-foreground">订单名会加上「{f.level}」</span>}
+          </div>
           <Field label="订单名称" htmlFor="q-title" required className="col-span-2">
             <div className="relative">
             <input
               id="q-title"
               ref={titleRef}
-              autoFocus
               className={cn(inputCls, 'pr-12 text-base', tried && missing.title && 'border-danger')}
               placeholder="例如：乡村振兴背景下县域电商发展路径"
               value={f.title}
@@ -506,40 +639,24 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
             </div>
             </div>
             {numberHintStatus === 'error' && <p className="mt-1 text-xs text-muted-foreground">暂未获取到单号，可手动填写名称</p>}
+            {levelTitle && levelTitle !== f.title.trim() && <p className="mt-1 truncate text-xs text-muted-foreground" title={levelTitle}>保存为：<span className="text-foreground">{levelTitle}</span></p>}
           </Field>
-          {f.salesMode !== 'cost' && <Field label="渠道" htmlFor="q-channel" required className="col-span-1">
+          {f.salesMode !== 'cost' && <Field label="渠道" htmlFor="q-channel" required className="col-span-2">
             <Popover open={channelOpen} onOpenChange={setChannelOpen}>
               <PopoverTrigger asChild><button id="q-channel" type="button" aria-label={selectedChannel ? `更换渠道：${selectedChannel.name}` : '选择渠道'} aria-invalid={tried && missing.channelId}
                 className={cn('flex min-h-9 w-full min-w-0 items-center gap-2 rounded-md text-left text-sm outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-primary/40', tried && missing.channelId && 'ring-1 ring-danger')}>
                 {selectedChannel ? <><ChannelAvatar channel={selectedChannel} size={24}/><span className="min-w-0 truncate">{selectedChannel.name}</span></> : <span className="text-muted-foreground">选择渠道</span>}
                 <span className="ml-auto inline-flex shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground">{selectedChannel && '更换'}<CaretDown size={12}/></span>
               </button></PopoverTrigger>
-              <PopoverContent align="start" className="w-[min(320px,calc(100vw-48px))] p-3">
+              <PopoverContent align="start" className="w-[min(320px,calc(100vw-48px))] p-3"
+                onCloseAutoFocus={e => { if (!advanceAfterChannel.current) return; advanceAfterChannel.current = false; e.preventDefault(); if (document.activeElement?.id !== 'q-price') focusPrice() }}>
                 <Combobox autoFocus inlineList id="q-channel-search" value={f.channelId} options={channelOpts} placeholder="搜索或新建渠道"
-                  onChange={channelId => { set('channelId', channelId); setChannelOpen(false) }}
-                  onCreate={async label => (await createChannel(label, admin ? f.ownerId : me.id))?.id ?? null}/>
+                  // 选中当下就把焦点交给销售额：不等选择框收起动画，免得接着输的金额落进渠道搜索、回车又新建出一个渠道
+                  onChange={channelId => { set('channelId', channelId); advanceAfterChannel.current = true; setChannelOpen(false); focusPrice() }}
+                  onCreate={proxying ? undefined : async label => (await createChannel(label, admin ? f.ownerId : me.id))?.id ?? null}/>
               </PopoverContent>
             </Popover>
           </Field>}
-          <Field label="归属销售" htmlFor="q-owner" className={f.salesMode === 'cost' ? 'col-span-2' : 'col-span-1'}>
-            <div className="flex min-h-9 items-center gap-2">
-              <Avatar user={s.users.find(u => u.id === f.ownerId) ?? me} size={24} />
-              <span className="min-w-0 truncate text-sm">{s.users.find(u => u.id === f.ownerId)?.name ?? me.name}</span>
-              {admin && <Popover open={ownerOpen} onOpenChange={setOwnerOpen}>
-                <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="ml-auto h-8 px-2 text-xs" aria-label="更换归属销售">更换<CaretDown size={12}/></Button></PopoverTrigger>
-                <PopoverContent align="end" className="w-[min(320px,calc(100vw-48px))] p-3">
-                  <PersonChoice showSalesMode label="选择归属销售" people={salesPeople(s)} value={f.ownerId} onChange={ownerId => {
-                    setF(x => {
-                      if (ownerId === x.ownerId) return x
-                      const salesMode = s.users.find(u => u.id === ownerId)?.salesMode ?? 'commission'
-                      return { ...x, ownerId, salesMode, ...(salesMode !== x.salesMode ? { basePrice: '', paidAmount: '', paidNote: '', paidProof: undefined } : {}) }
-                    })
-                    setOwnerOpen(false)
-                  }}/>
-                </PopoverContent>
-              </Popover>}
-            </div>
-          </Field>
           <div className="col-span-2 grid grid-cols-2 items-start gap-x-3 gap-y-2">
           <Field label={f.salesMode === 'cost' ? '销售应付底价' : '销售额'} htmlFor="q-price" required className="col-span-1">
             <div className="relative">
@@ -568,7 +685,8 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
           {can('payment.create') && <div className="col-span-1 min-w-0">
             <IntakePayment stacked quickPercentages label={f.salesMode === 'cost' ? '销售已付' : f.paymentTag === '全款' ? '已收全款' : '已收定金'} id="q-paid" amount={f.paidAmount} tag={f.paymentTag} total={f.basePrice === '' ? null : Number(f.basePrice)} invalid={tried && !validPaidAmount(f.paidAmount)} onChange={(paidAmount, paymentTag) => setF(x => ({ ...x, paidAmount, paymentTag }))} />
           </div>}
-          {can('payment.create') && Number(f.paidAmount) > 0 && <div className="col-span-2"><FinancialNote note={f.paidNote} proof={f.paidProof} onNote={paidNote => set('paidNote', paidNote)} onProof={paidProof => set('paidProof', paidProof)} onReading={setReadingPayment} disabled={busy || readingPayment || !!created} required={!role.locked} /></div>}
+          {/* 销售记收款必须附备注或截图，留在原位；管理员可空，收进「更多信息」 */}
+          {can('payment.create') && !role.locked && Number(f.paidAmount) > 0 && <div className="col-span-2"><FinancialNote note={f.paidNote} proof={f.paidProof} onNote={paidNote => set('paidNote', paidNote)} onProof={paidProof => set('paidProof', paidProof)} onReading={setReadingPayment} disabled={busy || readingPayment || !!created} required={!role.locked} /></div>}
           </div>
 
           {pickWriter && (
@@ -609,7 +727,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
           )}
           <div className="col-span-2 grid gap-2 rounded-lg border bg-muted/20 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2"><label htmlFor="q-due" className="text-xs font-medium">截止日期</label><button type="button" aria-pressed={f.urgent} onClick={() => set('urgent', !f.urgent)} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs', f.urgent ? 'border-warn/40 bg-warn/10 font-medium text-warn' : 'border-transparent text-muted-foreground hover:bg-accent')}><Lightning size={12} weight={f.urgent ? 'fill' : 'regular'}/>加急</button></div>
+              <div className="flex items-center gap-2"><label htmlFor="q-due" className="text-xs font-medium">截止日期</label><button type="button" aria-pressed={f.urgent} onClick={() => set('urgent', !f.urgent)} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs', f.urgent ? 'border-warn/40 bg-warn/10 font-medium text-warn' : 'border-transparent text-muted-foreground hover:bg-accent')}><Lightning size={12} weight={f.urgent ? 'fill' : 'regular'}/>加急</button><button type="button" aria-pressed={f.important} onClick={() => set('important', !f.important)} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs', f.important ? 'border-warn/40 bg-warn/10 font-medium text-warn' : 'border-transparent text-muted-foreground hover:bg-accent')}><Star size={12} weight={f.important ? 'fill' : 'regular'}/>重要</button></div>
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <label htmlFor="q-date">下单</label>
                 <DateField aria-label="下单日期" required id="q-date" className="num h-7 w-auto border-transparent bg-transparent px-1.5 text-xs text-muted-foreground shadow-none hover:bg-accent" value={f.orderDate} onChange={(e) => { const orderDate = e.target.value; if (orderDate) setF(x => ({ ...x, orderDate, dueDate: deadlineFrom(orderDate) })) }} />
@@ -628,12 +746,14 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
           </div>
 
           {f.urgent && <input aria-label="加急说明" maxLength={500} value={f.urgencyNote} onChange={e => set('urgencyNote', e.target.value)} className={cn(inputCls, 'col-span-2 border-warn/30')} placeholder="加急说明（可选）"/>}
+          {f.important && <input aria-label="重要说明" maxLength={500} value={f.importanceNote} onChange={e => set('importanceNote', e.target.value)} className={cn(inputCls, 'col-span-2 border-warn/30')} placeholder="重要说明（可选），会通知写手"/>}
           <button type="button" onClick={() => setMore(!more)} aria-expanded={more} aria-controls="q-more" className="col-span-2 flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <CaretDown size={12} className={cn('transition-transform', more && 'rotate-180')} /> 更多信息
           </button>
           <AnimatePresence initial={false}>
             {more && (
               <motion.div id="q-more" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} onAnimationComplete={(d) => { if ((d as { height?: string }).height === 'auto') formRef.current?.querySelector(shots.length ? '#q-shots' : '#q-note')?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' }) }} className="col-span-2 grid grid-cols-2 gap-3 overflow-hidden p-0.5">
+                {can('payment.create') && role.locked && Number(f.paidAmount) > 0 && <div className="col-span-2"><FinancialNote note={f.paidNote} proof={f.paidProof} onNote={paidNote => set('paidNote', paidNote)} onProof={paidProof => set('paidProof', paidProof)} onReading={setReadingPayment} disabled={busy || readingPayment || !!created} /></div>}
                 <Field label="备注 / 补充要求" htmlFor="q-note" className="col-span-2">
                   <div className="relative">
                     <textarea id="q-note" rows={3} className={cn(inputCls, 'h-auto resize-y py-2 pr-10', imageFeedback.className)} placeholder="补充要求，或直接粘贴截图" value={f.note} onChange={(e) => set('note', e.target.value)} />
@@ -675,6 +795,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
             <span>{feedback.message}</span>
           </div>
           <div className="flex items-center justify-between gap-2 sm:flex-wrap sm:gap-3">
+          <span className="hidden text-xs text-muted-foreground lg:inline" aria-hidden><span className="kbd">↵</span> 下一项 · <span className="kbd">⇧↵</span> 上一项 · 停在保存上再按 <span className="kbd">↵</span> 录入</span>
           <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
             <Checkbox id="q-keep" disabled={busy} checked={keepGoing} onCheckedChange={(v) => setKeepGoing(!!v)} />
             <span className="sm:hidden">连续录单</span><span className="hidden sm:inline">保存后继续录下一单</span>
@@ -683,7 +804,7 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
             <Button variant="ghost" size="sm" className="h-10 sm:h-8" disabled={busy || readingShots || !!pendingPayment.current?.length} onClick={() => dismiss.requestOpenChange(false)}>
               {created ? '关闭（订单已保存）' : '取消'}
             </Button>
-            <Button size="sm" onClick={save} disabled={busy || readingPayment || readingShots || numberRefreshing} aria-busy={busy && feedback.status !== 'success'} aria-describedby="q-save-feedback" className="h-10 gap-2 px-5 sm:h-8 sm:px-3">
+            <Button id="q-save" size="sm" onClick={save} disabled={busy || readingPayment || readingShots} aria-busy={busy && feedback.status !== 'success'} aria-describedby="q-save-feedback" className="h-10 gap-2 px-5 sm:h-8 sm:px-3">
               {feedback.status === 'success' ? '已完成' : busy ? '保存中…' : created ? '继续保存' : feedback.status === 'uncertain' ? '核对后重试' : '保存'} <span className="num hidden text-xs opacity-70 sm:inline">⌘↵</span>
             </Button>
           </div>
@@ -693,21 +814,36 @@ export function QuickEntry({ open, onOpenChange, prefill }: { open: boolean; onO
     </Dialog>
     {savedEntry && <Dialog open={receiptOpen} onOpenChange={next => { receiptVisible.current = next; setReceiptOpen(next) }}>
       <AppDialogContent size="sm" id="q-share-receipt" className="bottom-auto top-1/2 w-[calc(100vw-32px)] -translate-y-1/2 rounded-xl pb-0 sm:w-[min(560px,calc(100vw-48px))]"
+        // 连续录单：弹出时焦点在「继续录单」，回车进下一单；⌘C / Ctrl+C 直接复制整段发群文案
+        onOpenAutoFocus={event => { event.preventDefault(); document.getElementById('q-receipt-next')?.focus() }}
+        onKeyDown={event => {
+          if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'c' || window.getSelection()?.toString()) return
+          // 先选中整段文案，再让浏览器自己复制（不依赖剪贴板权限，Safari 和内网 IP 也能用）
+          const text = document.getElementById('q-receipt-text')
+          const selection = window.getSelection()
+          if (!text || !selection) return
+          const range = document.createRange()
+          range.selectNodeContents(text)
+          selection.removeAllRanges()
+          selection.addRange(range)
+          setTimeout(() => { if (selection.toString().trim()) toast.success('已复制发群文案') })
+        }}
         onCloseAutoFocus={event => {
           event.preventDefault()
-          if (open && keepGoing) titleRef.current?.focus()
+          if (open && keepGoing) levelRef.current?.focus()
         }}>
         <DialogTitle className="sr-only">订单已保存</DialogTitle>
         <DialogDescription className="sr-only">发群文案，可复制或直接选取文字</DialogDescription>
         <AppDialogBody className="px-5 pb-3 pt-12 sm:px-6">
           <div className="flex items-start gap-3">
             <CheckCircle aria-hidden size={25} weight="fill" className="mt-0.5 shrink-0 text-primary"/>
-            <p className="min-w-0 flex-1 select-text break-words text-base leading-7">{savedEntry.text}</p>
+            <p id="q-receipt-text" className="min-w-0 flex-1 select-text break-words text-base leading-7">{savedEntry.text}</p>
             <CopyOrderName title={savedEntry.text} textLabel="发群文案" className="h-10 w-10 text-primary"/>
           </div>
         </AppDialogBody>
         <AppDialogFooter className="justify-end border-t-0 pt-0">
-          <Button size="sm" className="h-10 sm:h-8" onClick={() => { receiptVisible.current = false; setReceiptOpen(false) }}>{keepGoing ? '继续录单' : '完成'}</Button>
+          <span className="mr-auto hidden items-center gap-1 text-xs text-muted-foreground sm:inline-flex" aria-hidden><span className="kbd">⌘C</span> 复制文案 · <span className="kbd">↵</span> {keepGoing ? '继续录单' : '完成'}</span>
+          <Button id="q-receipt-next" size="sm" className="h-10 sm:h-8" onClick={() => { receiptVisible.current = false; setReceiptOpen(false) }}>{keepGoing ? '继续录单' : '完成'}</Button>
         </AppDialogFooter>
       </AppDialogContent>
     </Dialog>}

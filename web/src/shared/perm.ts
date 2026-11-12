@@ -1,5 +1,5 @@
 import type { FieldGroups, Order, OrderView, PermKey, Role, RowScope, SettleStatus, User } from './types'
-import { calc, customerStage, ownerCommission, sumMoney } from './calc'
+import { calc, customerStage, ownerCommission, proxyFee, sumMoney } from './calc'
 import { paymentSnapshot } from './reconciliation'
 import { remaining } from './settle'
 
@@ -79,9 +79,10 @@ export function canAdjustDeadline(order: { assignees: { userId: string }[] }, us
   return can(role, 'order.edit') || (can(role, 'order.draft') && order.assignees.some(a => a.userId === user.id))
 }
 
-export function rowVisible(order: Pick<Order, 'ownerId'> & { assignees: { userId: string }[] }, user: Pick<User, 'id'>, role: Role) {
+export function rowVisible(order: Pick<Order, 'ownerId'> & { proxyId?: string | null; assignees: { userId: string }[] }, user: Pick<User, 'id'>, role: Role) {
   if (role.locked) return true
-  const owned = order.ownerId === user.id
+  // 替暂停的销售代录的单，代录人也能看到
+  const owned = order.ownerId === user.id || (!!order.proxyId && order.proxyId === user.id)
   const assigned = order.assignees.some((a) => a.userId === user.id)
   switch (role.rowScope) {
     case 'all':
@@ -163,6 +164,11 @@ export function project(order: Order, user: User, role: Role, adminIds: Set<stri
   if (f.commission === 'all' || (f.commission === 'own' && order.ownerId === user.id)) {
     v.commission = ownerCommission(order, c.commission)
     if (role.locked) v.commissionRate = order.commissionRate
+  }
+  if (order.proxyId) {
+    v.proxyId = order.proxyId
+    // 代录费：老板、归属销售（从他提成里扣）、代录人本人看得到
+    if (f.commission === 'all' || (f.commission === 'own' && (order.ownerId === user.id || order.proxyId === user.id))) v.proxyFee = c.payPending ? null : proxyFee(order, c.commission)
   }
   if (f.profit) { v.extraCosts = order.extraCosts ?? []; v.extraCostTotal = c.extraCostTotal; v.allocationBase = c.allocationBase; v.profit = c.profit; v.bossIncome = c.bossIncome; v.externalWriterTotal = c.externalWriterTotal }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowCounterClockwise, CaretDown, Plus } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,7 @@ import { money, businessDate } from '@/shared/format'
 import type { OrderView } from '@/shared/types'
 import { FinancialNote, FinancialNoteView } from './FinancialNote'
 import { addOrderCost, revokeOrderCost, useSession } from './store'
-import { inputCls } from './ui'
+import { inputCls, Combobox } from './ui'
 
 export function OrderCosts({ v }: { v: OrderView }) {
   const { role } = useSession()
@@ -37,6 +37,8 @@ export function OrderCosts({ v }: { v: OrderView }) {
 function CostForm({ id, onClose }: { id: string; onClose: () => void }) {
   const [name, setName] = useState('实物外包'), [contractor, setContractor] = useState(''), [amount, setAmount] = useState(''), [date, setDate] = useState(businessDate(new Date()))
   const [note, setNote] = useState(''), [proof, setProof] = useState<string>(), [reading, setReading] = useState(false), [busy, setBusy] = useState(false)
+  const [partners,setPartners] = useState<{id:string;name:string;active:boolean}[]>([]), [contractorId,setContractorId] = useState('')
+  useEffect(()=>{ void fetch('/api/contractors').then(r=>r.ok?r.json():null).then(d=>{if(d)setPartners(d.rows.filter((p:{active:boolean})=>p.active))}).catch(()=>{}) },[])
   const [requestId] = useState(() => crypto.randomUUID())
   return <form className="grid gap-3 rounded-md bg-muted/30 p-3" onSubmit={async e => {
     e.preventDefault()
@@ -44,12 +46,12 @@ function CostForm({ id, onClose }: { id: string; onClose: () => void }) {
     const value = Number(amount)
     if (!name.trim() || !Number.isFinite(value) || value <= 0 || !date) return toast.error('请填写项目、金额和日期')
     setBusy(true)
-    try { if (await addOrderCost(id, { requestId, name, contractor, amount: value, date, note, proof })) { toast.success('成本已登记'); onClose() } }
+    try { if (await addOrderCost(id, { requestId, name, contractor, contractorId: contractorId || undefined, amount: value, date, note, proof })) { toast.success('成本已登记'); onClose() } }
     finally { setBusy(false) }
   }}>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <label className="grid gap-1 text-xs text-muted-foreground">成本项目<input aria-label="成本项目" autoFocus maxLength={100} required value={name} onChange={e => setName(e.target.value)} className={inputCls} disabled={busy}/></label>
-      <label className="grid gap-1 text-xs text-muted-foreground">外包方<input aria-label="外包方" placeholder="工作室或姓名（可空）" maxLength={100} value={contractor} onChange={e => setContractor(e.target.value)} className={inputCls} disabled={busy}/></label>
+      <label className="grid gap-1 text-xs text-muted-foreground">外包方<Combobox value={contractorId} onChange={id=>{setContractorId(id);setContractor(partners.find(p=>p.id===id)?.name??'')}} options={[{value:'',label:'手动填写'},...partners.map(p=>({value:p.id,label:p.name}))]}/>{!contractorId&&<input aria-label="外包方" placeholder="工作室或姓名（可空）" maxLength={100} value={contractor} onChange={e => setContractor(e.target.value)} className={inputCls} disabled={busy}/>}</label>
       <label className="grid gap-1 text-xs text-muted-foreground">成本金额<div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2">¥</span><input aria-label="成本金额" inputMode="decimal" type="number" min="0.01" max="10000000" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} className={cn(inputCls, 'pl-7 num')} disabled={busy}/></div></label>
       <label className="grid gap-1 text-xs text-muted-foreground">成本日期<input aria-label="成本日期" type="date" required value={date} onChange={e => setDate(e.target.value)} className={cn(inputCls, 'min-w-0')} disabled={busy}/></label>
     </div>

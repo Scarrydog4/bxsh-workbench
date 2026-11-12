@@ -16,6 +16,7 @@ import { businessDate } from '@/shared/format'
 import { RANKS } from '@/shared/rank'
 import { usePref } from './prefs'
 import { imageFilesFromTransfer, preservePickedImages } from './image-input'
+import { AgentAccess } from './AgentAccess'
 import { SettingsSection } from './SettingsSection'
 
 const profileTabs = ['profile', 'password', 'sessions', 'resources'] as const
@@ -157,7 +158,7 @@ export function ProfileDialog({ open, onOpenChange, resources, initialTab, onTab
             </TabsContent>
             <TabsContent value="resources" className="mt-0"><SettingsSection title="常用资源" desc="客户端和工作中常用的资料。">
               {resources ? <div className="[&>section>h2]:hidden [&>section>div.grid]:grid-cols-1 sm:[&>section>div.grid]:grid-cols-2">{resources}</div> : <div className="grid min-h-48 justify-items-center content-center gap-3 text-sm text-muted-foreground"><LinkSimple size={30}/><span>还没有常用资源</span></div>}
-            </SettingsSection></TabsContent>
+            </SettingsSection><SettingsSection title="外部 Agent"><AgentAccess/></SettingsSection></TabsContent>
           </AppDialogBody>
         </Tabs>
         {frameNotice && <div role="status" aria-live="polite" className="mx-6 mb-4 flex shrink-0 items-center justify-between gap-4 rounded-xl border border-primary/25 bg-card px-4 py-3 text-sm shadow-sm">

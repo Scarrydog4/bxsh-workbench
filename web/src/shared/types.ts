@@ -69,6 +69,8 @@ export interface User {
   canWrite: boolean
   /** 停用的账号不能登录、不能被选为新单的人，但历史订单照常显示和计算 */
   active: boolean
+  /** 销售暂停接单的时间：头像变灰，其他销售可以替他录单 */
+  pausedAt?: string | null
 }
 
 export interface Channel {
@@ -170,6 +172,7 @@ export interface Payment {
 }
 
 export interface ExtraCost {
+  contractorId?: string | null
   id: string
   name: string
   contractor: string
@@ -218,6 +221,10 @@ export interface Order {
   status: string
   note: string
   commissionRate: number
+  /** 代录人：归属销售暂停时替他录单的销售 */
+  proxyId?: string | null
+  /** 代录费比例，按实收总金额算，从归属销售提成里扣 */
+  proxyRate?: number
   salesMode?: SalesMode
   paymentCheckedAt?: string | null
   paymentCheckedBy?: string | null
@@ -398,6 +405,10 @@ export interface OrderView {
   myPay?: number | null
   commission?: number
   commissionRate?: number
+  /** 代录人（替暂停的归属销售录的单） */
+  proxyId?: string | null
+  /** 代录费：从归属销售提成里扣给代录人；null = 写手工资没定，还算不出 */
+  proxyFee?: number | null
   bossIncome?: number
   externalWriterTotal?: number
   profit?: number

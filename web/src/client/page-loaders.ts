@@ -3,6 +3,8 @@ import { getState } from './store'
 import { memo } from 'react'
 import type { Page } from './nav'
 export const pageLoaders = {
+  inquiries: () => import('./InquiriesPage').then(m => m.InquiriesPage),
+  contractors: () => import('./ContractorsPage').then(m => m.ContractorsPage),
   cases: () => import('./work-materials/Library').then(m => m.Library),
   talk: () => import('./work-materials/Library').then(m => m.Library),
   reviews: () => import('./work-materials/Reviews').then(m => m.Reviews),

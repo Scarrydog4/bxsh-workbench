@@ -79,3 +79,20 @@ it('空写手订单可在发布售后时指定负责人，权限和工资由订�
  expect(boot.orders.some((o:any)=>o.id===id)).toBe(true)
  expect(boot.notifications.some((n:any)=>n.orderId===id&&n.kind==='订单加急'&&n.title.startsWith('加急：'))).toBe(true)
 })
+
+
+it('写手可给自己的订单上传跟进和截图，不开放他人订单或定工资权限', async () => {
+ const own = await boss.act('order.create', {title:'写手自行登记跟进',channelId,ownerId:'u-acheng',orderDate:'2026-11-06',dueDate:null,basePrice:500,assignees:[{userId:'u-xiao',pay:100}]})
+ expect(own.status).toBe(200)
+ const id = own.body.id, before = await db.select().from(t.settlements)
+ expect((await writer.act('aftersale.create',{orderId:id,req:['追加说明'],reason:'新增需求',extra:99})).status).toBe(403)
+ const otherOrder = await boss.act('order.create',{title:'其他人的订单',channelId,ownerId:'u-boss',orderDate:'2026-11-06',dueDate:null,basePrice:300,assignees:[]})
+ expect((await writer.act('aftersale.create',{orderId:otherOrder.body.id,req:['不能跨单']})).status).toBe(404)
+ const sent = await writer.act('aftersale.create',{orderId:id,req:['群内补充了修改要求'],shots:['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWMQLYr6D8IMMAYAPkYHgS+ItD8AAAAASUVORK5CYII=']})
+ expect(sent.status).toBe(200)
+ const saved = await task(sent.body.id)
+ expect(saved).toMatchObject({by:'u-xiao',writerId:'u-xiao',req:['群内补充了修改要求'],extra:0})
+ expect(saved.shots).toHaveLength(1)
+ expect((await writer.act('aftersale.create',{orderId:id,req:['不能重复开轮次']})).status).toBe(400)
+ expect(await db.select().from(t.settlements)).toEqual(before)
+})

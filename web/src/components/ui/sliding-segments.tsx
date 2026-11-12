@@ -3,6 +3,7 @@
 import { useRef, type CSSProperties, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
+// Motion Prompt #060 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#060
 /** Equal-width choices share one moving indicator; the form underneath never remounts. */
 export function SlidingSegments<T extends string>({ value, onValueChange, options, label, disabled, className, buttonClassName }: {
   value: T

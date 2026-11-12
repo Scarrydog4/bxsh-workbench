@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { plainKey } from './shortcuts'
 import { toast } from 'sonner'
 import { AnimatePresence, motion } from 'motion/react'
-import { Bell, Lightning, List, MagnifyingGlass, Plus, CalendarX, CalendarCheck, UserPlus, Camera, UserCircle, GearSix, SignOut, Wrench, BellRinging, Receipt, Wallet, At, UsersThree, ChatsCircle, Megaphone, ChatCircleDots, type Icon } from '@phosphor-icons/react'
+import { Bell, Lightning, List, MagnifyingGlass, Plus, CalendarX, CalendarCheck, UserPlus, Camera, UserCircle, GearSix, SignOut, Wrench, BellRinging, Receipt, Wallet, At, UsersThree, ChatsCircle, Megaphone, ChatCircleDots, PauseCircle, PlayCircle, type Icon } from '@phosphor-icons/react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -21,7 +21,7 @@ import { Avatar, ImageDrop, cropAvatar } from './ui'
 import { imageFilesFromTransfer } from './image-input'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useNav, type Page } from './nav'
-import { logout, setUserAvatar, useSession, useWorkspaceStatus } from './store'
+import { logout, setUserAvatar, setUserPaused, useSession, useWorkspaceStatus } from './store'
 import { markRead } from './store-p2'
 import dynamic from 'next/dynamic'
 const loadProfile = () => import('./Profile')
@@ -43,6 +43,10 @@ const CheckinDialog=lazy(()=>loadCheckin().then(m=>({ default: m.CheckinDialog }
 export function Topbar({ onMenu }: { onMenu: () => void }) {
   const { me, role, can, s } = useSession()
   const { palette, newOrder, go } = useNav()
+  async function togglePause() {
+    const pausing = !me.pausedAt
+    if (await setUserPaused(me.id, pausing)) toast.success(pausing ? '已暂停接单' : '已恢复接单')
+  }
   const dmUnread = useDmUnread()
   const workspaceReady = useWorkspaceStatus() === 'ready'
   const [avatarOpen, setAvatarOpen] = useState(false)
@@ -185,6 +189,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
               {dmUnread > 0 && <span className="num ml-auto min-w-5 rounded-full bg-primary px-1.5 text-center text-[11px] leading-5 text-primary-foreground">{dmUnread}</span>}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            {me.isSales && !me.isAdmin && <DropdownMenuItem className="gap-2" onSelect={() => void togglePause()}>
+              {me.pausedAt ? <><PlayCircle size={15} /> 恢复接单</> : <><PauseCircle size={15} /> 暂停接单</>}
+            </DropdownMenuItem>}
             <DropdownMenuItem
               className="gap-2"
               onSelect={() => setAvatarOpen(true)}

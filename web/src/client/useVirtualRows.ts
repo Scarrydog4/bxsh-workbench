@@ -2,14 +2,15 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { RefObject } from 'react'
 
 /** 实测行高，滚动时同步补齐视口；分组日期和多写手行不再按固定高度推算。 */
-export function useVirtualRows<T extends { id: string }>(rows: T[], ref: RefObject<HTMLDivElement | null>, height: number, enabled: boolean) {
+export function useVirtualRows<T extends { id: string }>(rows: T[], ref: RefObject<HTMLDivElement | null>, height: number, enabled: boolean, options: { scrollMargin?: number; overscan?: number } = {}) {
+  const margin = options.scrollMargin ?? 36
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => ref.current,
     getItemKey: index => rows[index].id,
     estimateSize: () => height,
-    overscan: 20,
-    scrollMargin: 36,
+    overscan: options.overscan ?? 20,
+    scrollMargin: margin,
     initialRect: { width: 0, height: 720 },
     enabled,
   })
@@ -19,8 +20,8 @@ export function useVirtualRows<T extends { id: string }>(rows: T[], ref: RefObje
   return {
     rows: enabled ? rows.slice(start, end) : rows,
     start: enabled ? start : 0,
-    before: enabled && items.length ? Math.max(0, items[0].start - 36) : 0,
-    after: enabled && items.length ? Math.max(0, virtual.getTotalSize() - (items.at(-1)!.end - 36)) : 0,
+    before: enabled && items.length ? Math.max(0, items[0].start - margin) : 0,
+    after: enabled && items.length ? Math.max(0, virtual.getTotalSize() - (items.at(-1)!.end - margin)) : 0,
     measureElement: enabled ? virtual.measureElement : undefined,
   }
 }

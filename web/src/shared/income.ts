@@ -25,7 +25,7 @@ export interface IncomeRow {
   title: string
   date: string
   status: string
-  kind: '工资' | '追加工资' | '已发工资' | '提成' | '已发提成' | '订单收入'
+  kind: '工资' | '追加工资' | '已发工资' | '提成' | '已发提成' | '代录费' | '订单收入'
   amount: number | null
   pay: string
   settle?: '未结' | '部分已结' | '已结'
@@ -77,6 +77,8 @@ export type PayKind = '写手工资' | '销售提成'
 export interface PayLine {
   key: string; id: string; no: string; title: string; date: string; status: string; kind: PayKind
   due: number | null; paid: number; left: number; over: number; suggest?: number; custStage?: CustomerStage
+  /** 替暂停的销售代录得的代录费 */
+  proxy?: boolean
 }
 
 /** 一单一人一种收入一行；工资与追加工资共用整单数值，只取一次。 */
@@ -84,10 +86,10 @@ export function payLedger(rows: IncomeRow[]): PayLine[] {
   const out = new Map<string, PayLine>()
   for (const r of rows) {
     if (r.kind === '订单收入') continue
-    const kind: PayKind = r.kind.includes('提成') ? '销售提成' : '写手工资'
+    const kind: PayKind = r.kind.includes('提成') || r.kind === '代录费' ? '销售提成' : '写手工资'
     const key = `${r.id}:${kind}`
     if (out.has(key) && r.kind !== '工资') continue
-    out.set(key, { key, id: r.id, no: r.no, title: r.title, date: r.date, status: r.status, kind, due: r.due === undefined ? r.amount : r.due, paid: r.paid ?? 0, left: r.left ?? 0, over: r.over ?? 0, suggest: r.suggest, custStage: r.custStage })
+    out.set(key, { key, id: r.id, no: r.no, title: r.title, date: r.date, status: r.status, kind, ...(r.kind === '代录费' ? { proxy: true } : {}), due: r.due === undefined ? r.amount : r.due, paid: r.paid ?? 0, left: r.left ?? 0, over: r.over ?? 0, suggest: r.suggest, custStage: r.custStage })
   }
   return [...out.values()].sort((a, b) => b.no.localeCompare(a.no))
 }

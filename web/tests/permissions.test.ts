@@ -182,7 +182,10 @@ describe('导出 Excel 按权限裁列', () => {
     expect(head).toContain('应收金额')
     expect(head).not.toContain('写手工资')
     expect(head).not.toContain('预计利润')
-    expect(wb.worksheets[0].rowCount - 1).toBe(3) // A、D 和刚录的那单
+    const sheet = wb.worksheets[0], exported: string[] = []
+    const noColumn = head.indexOf('订单编号') + 1, titleColumn = head.indexOf('订单名称') + 1
+    sheet.eachRow((row,n) => { if(n > 1 && /^DD\d/.test(String(row.getCell(noColumn).value))) exported.push(String(row.getCell(titleColumn).value)) })
+    expect(exported.sort()).toEqual((await acheng.boot()).body.orders.map((o:any)=>o.title).sort())
   })
 })
 

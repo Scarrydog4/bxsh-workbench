@@ -12,7 +12,7 @@ import { AvatarFrameDecoration, RankFrameDecoration } from './AvatarFrames'
 import { RANKS, type Rank } from '@/shared/rank'
 
 /** 显示一个人只需要这几项（服务端给的公开信息） */
-export type Who = { id: string; name: string; hue: number; avatar?: string; frame?: string; rank?: Rank }
+export type Who = { id: string; name: string; hue: number; avatar?: string; frame?: string; rank?: Rank; pausedAt?: string | null }
 import { money } from '@/shared/format'
 
 function AvatarImage({ src, fallback }: { src?: string; fallback: string }) {
@@ -32,9 +32,9 @@ export function Avatar({ user, size = 22, className }: { user?: Who; size?: numb
       className={cn('relative inline-flex shrink-0 select-none align-middle leading-none items-center justify-center overflow-visible rounded-full font-medium', className)}
       // 小头像上的虫子伸出右边，多留点位置，免得压到名字
       style={{ '--h': user.hue, width: size, height: size, fontSize: size * 0.48, ...(rank && size < 24 ? { marginRight: size * 0.4 } : {}) } as CSSProperties}
-      title={rank ? `${user.name} · ${rank.name}（今日 ${rank.range}）` : user.name}
+      title={user.pausedAt ? `${user.name} · 暂停接单` : rank ? `${user.name} · ${rank.name}（今日 ${rank.range}）` : user.name}
     >
-      <span className="avatar inline-flex h-full w-full items-center justify-center overflow-hidden rounded-full ring-2 ring-background">
+      <span className={cn('avatar inline-flex h-full w-full items-center justify-center overflow-hidden rounded-full ring-2 ring-background', user.pausedAt && 'opacity-60 grayscale')}>
         <AvatarImage src={user.avatar} fallback={ch}/>
       </span>
       {rank ? <RankFrameDecoration rank={rank.id} size={size}/> : <AvatarFrameDecoration frame={user.frame} size={size}/>}

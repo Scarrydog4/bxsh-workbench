@@ -127,7 +127,8 @@ it('用户修改自动编号后，换销售不覆盖手写编号和业务名称'
 it('取号等待期间补写手工编号，迟到响应不能覆盖', async () => {
   const response = deferred<any>(); vi.mocked(fetch).mockReturnValueOnce(response.promise)
   fill(); const stop = hintEffect()
-  expect(saveButton().props.disabled).toBe(true)
+  // 取号期间保存按钮可按（按了先排队，单号回来再存），回车不会落在禁用按钮上被吞掉
+  expect(saveButton().props.disabled).toBe(false)
   find('q-title').props.onChange({ target: { value: '待定 XY26110308 客户原始题目' } })
   response.resolve(answer('aj26110301')); await flush()
   expect(find('q-title').props.value).toBe('待定 XY26110308 客户原始题目')
@@ -138,13 +139,13 @@ it('取号等待期间补写手工编号，迟到响应不能覆盖', async () =
 it('换归属销售和日期会刷新自动编号、保留名称；更新期间不提交旧编号', async () => {
   fill(); let stop = hintEffect(); await flush()
   nodes(render()).find(n => n.type === PersonChoice).props.onChange('acheng')
-  expect(saveButton().props.disabled).toBe(true)
+  expect(saveButton().props.disabled).toBe(false)
   await saveButton().props.onClick(); expect(createOrder).not.toHaveBeenCalled()
   vi.mocked(fetch).mockResolvedValueOnce(answer('ac26110305', 'acheng', '2026-11-03', 5) as any)
   stop(); stop = hintEffect(); await flush()
   expect(find('q-title').props.value).toBe('ac26110305 机械设计')
   find('q-date').props.onChange({ target: { value: '2026-11-04' } })
-  expect(saveButton().props.disabled).toBe(true)
+  expect(saveButton().props.disabled).toBe(false)
   vi.mocked(fetch).mockResolvedValueOnce(answer('ac26110401', 'acheng', '2026-11-04') as any)
   stop(); stop = hintEffect(); await flush()
   expect(find('q-title').props.value).toBe('ac26110401 机械设计')

@@ -2,7 +2,7 @@ import type { Page } from './nav'
 import { cn } from '@/lib/utils'
 
 const titles: Record<Page, string> = {
-  cases: '案例', talk: '话术', reviews: '复盘', home: '工作台', orders: '订单', channels: '渠道', settle: '工资结算', income: '收入',
+  contractors: '外包合作方', inquiries: '意向单', cases: '案例', talk: '话术', reviews: '奖惩', home: '工作台', orders: '订单', channels: '渠道', settle: '工资结算', income: '收入',
   tasks: '任务', aftersales: '交付跟进', toolbox: '工具箱', forum: '论坛', dm: '私信',
   assistant: '智能助手', settings: '系统设置', roles: '角色与账号', audit: '审计日志', trash: '回收站',
 }

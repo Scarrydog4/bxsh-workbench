@@ -16,7 +16,7 @@ export const COST_ACTIONS = {
     schema: z.object({
       id: z.string(), requestId: z.string().uuid(),
       name: z.string().trim().min(1, '请填写成本项目').max(100),
-      contractor: z.string().trim().max(100).default(''),
+      contractor: z.string().trim().max(100).default(''), contractorId: z.string().nullable().optional(),
       amount: z.number().positive('成本金额须大于 0').max(10_000_000).multipleOf(.01),
       date: day, note: z.string().trim().max(500).default(''), proof: dataImage.optional(),
     }),
@@ -24,8 +24,14 @@ export const COST_ACTIONS = {
       if (!c.role.locked) throw deny('只有老板能登记额外成本')
       const o = orderFor(w, c, i.id, 'order.price'), id = `cost-${i.id}-${c.me.id}-${i.requestId}`
       if (o.extraCosts?.some(line => line.id === id)) return { ok: true, id }
+      let contractor = i.contractor
+      if (i.contractorId) {
+        const [partner] = await tx.select().from(t.contractors).where(eq(t.contractors.id, i.contractorId))
+        if (!partner?.active) throw bad('外包合作方不存在或已停用')
+        contractor = partner.name
+      }
       const proof = i.proof ? privateImageUrl(await saveOrderImage(tx, i.proof, { orderId: o.id, by: c.me.id, purpose: 'cost-proof' })) : undefined
-      const line = { id, name: i.name, contractor: i.contractor, amount: i.amount, date: i.date, note: i.note, proof, at: new Date().toISOString(), by: c.me.id }
+      const line = { id, name: i.name, contractor, contractorId: i.contractorId, amount: i.amount, date: i.date, note: i.note, proof, at: new Date().toISOString(), by: c.me.id }
       await tx.insert(t.orderCosts).values({ ...line, orderId: o.id })
       await syncFixedAmount(tx, c, w, o, { ...o, extraCosts: [...o.extraCosts ?? [], line] }, false)
       await log(tx, c, { action: '登记成本', objectType: 'order', objectId: o.id, objectLabel: o.no, field: '额外成本', to: `${i.name} ${money(i.amount)}${i.contractor ? ` · ${i.contractor}` : ''} · ${i.date}`, fieldGroup: 'profit', note: i.note, proof })

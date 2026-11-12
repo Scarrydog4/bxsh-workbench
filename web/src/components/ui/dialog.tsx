@@ -20,6 +20,7 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
+    data-workspace-overlay
     className={cn(
       "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
@@ -37,6 +38,7 @@ const DialogContent = React.forwardRef<
     <DialogOverlay className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
+      data-workspace-dialog
       // 点右下角提示（如保存后的「订单卡」）不算点到弹窗外面
       onInteractOutside={(e) => {
         if ((e.target as Element | null)?.closest?.("[data-sonner-toaster]")) e.preventDefault()

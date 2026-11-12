@@ -257,6 +257,7 @@ export function OrderDrawer({
           </>
         )}
       </SheetContent>
+      {deletion.dialog}
     </Sheet>
   )
 }
@@ -361,7 +362,7 @@ function ReviewNote({ v }: { v: OrderView }) {
 function MoneyHero({ v }: { v: OrderView }) {
   const reduce = useReducedMotion()
   const [open, setOpen] = useState(false)
-  const { me, role } = useSession()
+  const { me, role, user } = useSession()
   const animationKey = `${me.id}:${role.id}:${role.fields?.sales}`
   if (v.sales === undefined) {
     if (v.myPay === undefined) return null
@@ -380,6 +381,7 @@ function MoneyHero({ v }: { v: OrderView }) {
   if (v.writerTotal !== undefined) minor.push({ label: '写手工资', value: v.writerTotal, pending: v.payPending, out: true })
   else if (v.myPay !== undefined) minor.push({ label: '我的工资', value: v.myPay })
   if (v.commission !== undefined && !v.isSelf && v.salesMode !== 'cost') minor.push({ label: '销售提成', value: v.commission, pending: v.payPending, out: true })
+  if (v.proxyFee !== undefined) minor.push({ label: `代录费 · ${user(v.proxyId ?? '')?.name ?? '代录人'}`, value: v.proxyFee, pending: v.payPending, out: true })
   if (v.bossIncome !== undefined) minor.push({ label: v.isSelf ? '预计收入 · 自营' : '预计收入', value: v.bossIncome, pending: v.payPending })
   return (
     <div data-order-field="价格" className="rounded-lg border bg-background">

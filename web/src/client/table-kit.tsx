@@ -19,6 +19,8 @@ import { ArrowDown, ArrowUp, CalendarBlank, Hash, UserCircle, Storefront, CheckC
 import { cn } from '@/lib/utils'
 import { usePref } from './prefs'
 import { ColumnDrag, MovableHeader } from './ColumnDrag'
+import { VirtualTableBody } from './VirtualTableBody'
+import { VirtualListBody } from './VirtualListBody'
 import { TableToolbar } from './TableToolbar'
 import { filterTableRows, tableFilterFields, type TableFilter, type TableFilterValue } from './table-filters'
 
@@ -190,7 +192,12 @@ export interface Col<T> {
   minSize?: number
   align?: 'right'
   hideable?: boolean
+  /** 表格比各列默认宽度之和更宽时，多出的宽度只分给标了 grow 的列（订单名、备注这类长文字），头像、按钮列保持原宽 */
+  grow?: boolean
 }
+
+/** 任一列标了 grow 时，其余列固定宽度，grow 列平分剩余宽度（table-layout: fixed 下不写宽度的列会吃掉余量） */
+const growOf = (column: { columnDef: { meta?: unknown } }) => !!(column.columnDef.meta as { grow?: boolean } | undefined)?.grow
 
 // flexRender 把 cell 函数当组件。保持组件类型不变，倒计时/数据刷新才不会卸载交付表单。
 function DataCell<T>({ column, row }: CellContext<T, unknown>) {
@@ -205,6 +212,7 @@ export function DataTable<T>({
   rowId,
   onRowClick,
   rowClassName,
+  rowAttrs,
   freeze = 1,
   maxHeight,
   empty,
@@ -216,6 +224,7 @@ export function DataTable<T>({
   groupLabel,
   toolbar,
   toolbarExtras,
+  toolbarActions,
   countLabel,
   toolbarSearch = true,
   toolbarSort = false,
@@ -231,6 +240,8 @@ export function DataTable<T>({
   rowId: (r: T) => string
   onRowClick?: (r: T) => void
   rowClassName?: (r: T) => string | false | undefined
+  /** 行上的 data-* 属性：键盘选行、测试定位用 */
+  rowAttrs?: (r: T) => Record<`data-${string}`, string | boolean | undefined>
   freeze?: number
   maxHeight?: string
   expandedRow?: (r: T) => ReactNode
@@ -245,6 +256,8 @@ export function DataTable<T>({
   embedded?: boolean
   toolbar?: (table: TanStackTable<T>) => ReactNode
   toolbarExtras?: ReactNode | ((table: TanStackTable<T>) => ReactNode)
+  /** 工具栏最右侧、「列」后面的操作按钮（如导出），拿到的是筛选后的表格 */
+  toolbarActions?: (table: TanStackTable<T>) => ReactNode
   countLabel?: (matching:number,total:number)=>string
   toolbarSearch?: boolean
   toolbarSort?: boolean
@@ -274,6 +287,13 @@ export function DataTable<T>({
   const filteredRows = useMemo(() => toolbar ? rows : filterTableRows(rows, filterFields, toolbarSearch ? query : '', filters), [rows, filterFields, query, filters, toolbar, toolbarSearch])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 639px)')
+    const update = () => setNarrow(media.matches)
+    update(); media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -292,7 +312,7 @@ export function DataTable<T>({
         accessorFn: c.sort ?? (() => 0),
         enableSorting: !!c.sort,
         enableHiding: c.hideable !== false,
-        meta: { align: c.align, render: c.cell },
+        meta: { align: c.align, render: c.cell, grow: c.grow },
         cell: DataCell<T>,
       })),
     [cols],
@@ -324,13 +344,15 @@ export function DataTable<T>({
   }
   const n = embedded ? 0 : Math.max(0, Math.min(count, leafs.length - 1, fittingPins))
   const layout = freezeLayout(leafs, n)
+  const large = tableRows.length > 100 && !embedded
+  const windowRows = large && !groupBy && !expandedRow && (fill || !!maxHeight)
 
   return (
     <>
-    {toolbar ? toolbar(table) : <TableToolbar table={table} fields={filterFields} query={query} onQueryChange={setQuery} filters={filters} onFiltersChange={setFilters} defaultVisibility={defaultVisibility} totalRows={rows.length} countLabel={countLabel} extras={typeof toolbarExtras === 'function' ? toolbarExtras(table) : toolbarExtras} searchable={toolbarSearch} sortable={toolbarSort} embedded={embedded} preferredFilterFields={preferredFilterFields} searchPlaceholder={searchPlaceholder} />}
+    {toolbar ? toolbar(table) : <TableToolbar table={table} fields={filterFields} query={query} onQueryChange={setQuery} filters={filters} onFiltersChange={setFilters} defaultVisibility={defaultVisibility} totalRows={rows.length} countLabel={countLabel} extras={typeof toolbarExtras === 'function' ? toolbarExtras(table) : toolbarExtras} searchable={toolbarSearch} sortable={toolbarSort} embedded={embedded} preferredFilterFields={preferredFilterFields} searchPlaceholder={searchPlaceholder}  actions={toolbarActions?.(table)}/>}
     <ColumnDrag ids={table.getAllLeafColumns().map(c => c.id)} visibleIds={leafs.map(c => c.id)} onChange={setOrder}>
     <div ref={scrollRef} tabIndex={embedded ? undefined : 0} aria-label={embedded ? undefined : '数据表格，可横向滚动'} className={cn('relative min-h-0 bg-card outline-none', embedded ? 'overflow-visible' : 'order-grid-scroll overflow-auto', fill ? 'flex-1' : 'border')} style={{ maxHeight }}>
-      <table className="workbench-grid hidden table-fixed border-separate border-spacing-0 sm:table" style={{ width: Math.max(table.getTotalSize(), 0), minWidth: '100%' }}>
+      {(!large || !narrow) && <table className="workbench-grid hidden table-fixed border-separate border-spacing-0 sm:table" style={{ width: Math.max(table.getTotalSize(), 0), minWidth: '100%' }}>
         <thead>
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id}>
@@ -344,7 +366,7 @@ export function DataTable<T>({
                     id={h.id}
                     label={String(h.column.columnDef.header)}
                     onSort={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}
-                    style={{ width: h.getSize(), ...fz.style }}
+                    style={{ width: growOf(h.column) ? undefined : h.getSize(), ...fz.style }}
                     className={cn('group/th top-0 z-10 h-9 border-b bg-card px-3 text-left text-[13px] font-normal text-muted-foreground', embedded ? 'relative' : 'sticky', right && 'text-right', fz.className)}
                     resize={<ResizeHandle header={h} />}
                   >
@@ -357,18 +379,18 @@ export function DataTable<T>({
             </tr>
           ))}
         </thead>
-        <tbody>
-          {tableRows.map((r,index) => {
+        <VirtualTableBody rows={tableRows} scrollRef={scrollRef} rowHeight={40} enabled={windowRows && !narrow} colSpan={leafs.length}>
+          {(r,index,measure) => {
             const detail = expandedRow?.(r.original)
             return (
-            <Fragment key={r.id}>{groupBy&&(index===0||groupBy(tableRows[index-1].original)!==groupBy(r.original))&&<tr><td colSpan={leafs.length} className="sticky top-9 z-10 border-b bg-muted px-3 py-2 text-sm font-medium">{groupLabel ? groupLabel(groupBy(r.original)) : groupBy(r.original)}</td></tr>}<tr onClick={onRowClick ? () => onRowClick(r.original) : undefined} className={cn('group/tr', onRowClick && 'cursor-pointer', rowClassName?.(r.original))}>
+            <Fragment key={r.id}>{groupBy&&(index===0||groupBy(tableRows[index-1].original)!==groupBy(r.original))&&<tr><td colSpan={leafs.length} className="sticky top-9 z-10 border-b bg-muted px-3 py-2 text-sm font-medium">{groupLabel ? groupLabel(groupBy(r.original)) : groupBy(r.original)}</td></tr>}<tr ref={measure} data-index={index} onClick={onRowClick ? () => onRowClick(r.original) : undefined} {...rowAttrs?.(r.original)} className={cn('group/tr', onRowClick && 'cursor-pointer', rowClassName?.(r.original))}>
               {r.getVisibleCells().map((c) => {
                 const right = (c.column.columnDef.meta as { align?: string } | undefined)?.align === 'right'
                 const fz = frozenCell(c.column.id, layout)
                 return (
                   <td
                     key={c.id}
-                    style={{ width: c.column.getSize(), maxWidth: c.column.getSize(), ...fz.style }}
+                    style={growOf(c.column) ? fz.style : { width: c.column.getSize(), maxWidth: c.column.getSize(), ...fz.style }}
                     className={cn('relative h-10 overflow-hidden border-b border-border/60 bg-card px-3 align-middle', onRowClick && 'group-hover/tr:bg-accent', right && 'text-right', fz.className)}
                   >
                     {flexRender(c.column.columnDef.cell, c.getContext())}
@@ -379,10 +401,10 @@ export function DataTable<T>({
             </tr>
             {<AnimatePresence initial={false}>{detail && <motion.tr key="detail"><td colSpan={leafs.length} className="bg-muted/20 p-0"><ExpandedContent><div className="border-b p-2">{detail}</div></ExpandedContent></td></motion.tr>}</AnimatePresence>}
             </Fragment>
-          )})}
-        </tbody>
-      </table>
-      <div className={cn('divide-y sm:hidden', !embedded && 'pb-20')}>{tableRows.map((r, index) => {
+          )}}
+        </VirtualTableBody>
+      </table>}
+      {(!large || narrow) && <VirtualListBody rows={tableRows} scrollRef={scrollRef} enabled={windowRows && narrow} estimate={156} className={cn('divide-y sm:hidden', !embedded && 'pb-20')}>{(r, index) => {
         const detail = expandedRow?.(r.original)
         return <Fragment key={r.id}>
           {groupBy && (index === 0 || groupBy(tableRows[index - 1].original) !== groupBy(r.original)) && <h3 className="bg-muted px-3 py-2 text-sm font-medium">{groupLabel ? groupLabel(groupBy(r.original)) : groupBy(r.original)}</h3>}
@@ -394,7 +416,7 @@ export function DataTable<T>({
             <div className="col-span-2 empty:hidden"><AnimatePresence initial={false}>{detail && <ExpandedContent key="detail"><div onClick={e => e.stopPropagation()} className="rounded-lg bg-muted/30 p-2">{detail}</div></ExpandedContent>}</AnimatePresence></div>
           </article>
         </Fragment>
-      })}</div>
+      }}</VirtualListBody>}
       {filteredRows.length === 0 && (filteredEmpty && (query || filters.length) ? filteredEmpty(() => query ? setQuery('') : setFilters([])) : rows.length > 0 ? <div className="px-4 py-12 text-center text-sm text-muted-foreground">没有符合条件的记录</div> : empty)}
     </div>
     </ColumnDrag>

@@ -6,6 +6,8 @@ import { pageLoaders } from './page-loaders'
 import { PageLoading } from './PageLoading'
 import type { Page } from './nav'
 import { Dashboard } from './Dashboard'
+import { IncomePage } from './IncomePage'
+import { WorkspaceHeading } from './WorkspaceHeading'
 import { TasksPage, TaskTabs } from './TasksPage'
 import { useSession } from './store'
 import { ADMIN_PAGES } from './page-route'
@@ -14,8 +16,9 @@ const Library = dynamic(pageLoaders.cases)
 const Reviews = dynamic(pageLoaders.reviews)
 const AfterSalesPage = dynamic(pageLoaders.aftersales, { loading: () => <PageLoading page="aftersales" /> })
 const OrdersPage = dynamic(pageLoaders.orders, { loading: () => <PageLoading page="orders" /> })
+const InquiriesPage = dynamic(pageLoaders.inquiries, { loading: () => <PageLoading page="inquiries" /> })
+const ContractorsPage = dynamic(pageLoaders.contractors, { loading: () => <PageLoading page="contractors" /> })
 const ChannelsPage = dynamic(pageLoaders.channels, { loading: () => <PageLoading page="channels" /> })
-const IncomePage = dynamic(pageLoaders.income, { loading: () => <PageLoading page="income" /> })
 const ForumPage = dynamic(pageLoaders.forum, { loading: () => <PageLoading page="forum" /> })
 const DmPage = dynamic(pageLoaders.dm, { loading: () => <PageLoading page="dm" /> })
 const ToolboxPage = dynamic(pageLoaders.toolbox, { loading: () => <PageLoading page="toolbox" /> })
@@ -32,6 +35,14 @@ type RouteState = {
 }
 export const WorkspacePageContext = createContext<RouteState>({ channelId: null, channelFocus: 0, afterSaleId: null, setAfterSaleId: () => {}, rewriteSeed: null, clearRewriteSeed: () => {} })
 
+/** Internal navigation can render the authorized client view before the route response arrives. */
+export function WorkspaceView({ page }: { page: Page }) {
+  if (page === 'cases' || page === 'talk') return <section className={'mx-auto w-full space-y-4 ' + (page === 'talk' ? 'max-w-[1240px]' : 'max-w-[1480px]')}>
+    <WorkspaceHeading title={page === 'talk' ? '话术' : '案例'} /><WorkspacePage page={page} />
+  </section>
+  return <WorkspacePage page={page} />
+}
+
 export function WorkspacePage({ page }: { page: Page }) {
   const state = useContext(WorkspacePageContext)
   const { role, me, can } = useSession()
@@ -44,6 +55,8 @@ export function WorkspacePage({ page }: { page: Page }) {
     case 'tasks': return <TasksPage />
     case 'aftersales': return <AfterSalesPage selectedId={state.afterSaleId} onSelect={state.setAfterSaleId} tabs={<TaskTabs view="aftersales" />} />
     case 'orders': return <OrdersPage />
+    case 'inquiries': return <InquiriesPage />
+    case 'contractors': return role.locked ? <ContractorsPage /> : null
     case 'channels': return <ChannelsPage initialId={state.channelId} focusToken={state.channelFocus} />
     case 'income': return <IncomePage />
     case 'forum': return <ForumPage />

@@ -12,7 +12,7 @@ import { tableFilterActive, tableFilterSummary, type TableFilter, type TableFilt
 import feedback from './filter-feedback.module.css'
 
 const inputClass = 'h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring'
-export function TableToolbar<T>({ table, fields, query, onQueryChange, filters, onFiltersChange, defaultVisibility, totalRows, countLabel, extras, searchable = true, sortable = false, embedded = false, preferredFilterFields, searchPlaceholder = '搜索表格' }: {
+export function TableToolbar<T>({ table, fields, query, onQueryChange, filters, onFiltersChange, defaultVisibility, totalRows, countLabel, extras, actions, searchable = true, sortable = false, embedded = false, preferredFilterFields, searchPlaceholder = '搜索表格' }: {
   table: Table<T>
   fields: TableFilterField<T>[]
   query: string
@@ -23,6 +23,8 @@ export function TableToolbar<T>({ table, fields, query, onQueryChange, filters, 
   totalRows: number
   countLabel?: (matching:number,total:number)=>string
   extras?: ReactNode
+  /** 放在「列」后面的操作，如导出 */
+  actions?: ReactNode
   searchable?: boolean
   sortable?: boolean
   embedded?: boolean
@@ -45,7 +47,7 @@ export function TableToolbar<T>({ table, fields, query, onQueryChange, filters, 
     <TableFilterPopover fields={fields} filters={filters} onFiltersChange={onFiltersChange} preferredFilterFields={preferredFilterFields} matching={matching} totalRows={totalRows} />
     {sortable && <TableSort table={table} />}
     {extras}
-    <div className="ml-auto flex shrink-0 items-center gap-2"><span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground" aria-live="polite">{countLabel ? countLabel(matching,totalRows) : matching === totalRows ? `${totalRows} 条` : `${matching} / ${totalRows} 条`}</span><ColumnSettings table={table} defaultVisibility={defaultVisibility} /></div>
+    <div className="ml-auto flex shrink-0 items-center gap-2"><span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground" aria-live="polite">{countLabel ? countLabel(matching,totalRows) : matching === totalRows ? `${totalRows} 条` : `${matching} / ${totalRows} 条`}</span><ColumnSettings table={table} defaultVisibility={defaultVisibility} />{actions}</div>
     {(active.length > 0 || query) && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 pt-0.5" aria-label="已选筛选条件">
       {query && <button type="button" aria-label="移除搜索条件" onClick={() => onQueryChange('')} className={cn('inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs', feedback.reveal)}><span className="break-words">搜索：{query}</span><X size={12} className="shrink-0"/></button>}
       {active.map(({ filter, index, field }) => {

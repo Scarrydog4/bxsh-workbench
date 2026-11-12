@@ -3,6 +3,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
+// Motion Prompt #052 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#052
 /** A local expanding region. Contents stay mounted so inputs survive closing/reopening. */
 export function Disclosure({ summary, children, className, triggerClassName, defaultOpen = false }: {
   summary: ReactNode

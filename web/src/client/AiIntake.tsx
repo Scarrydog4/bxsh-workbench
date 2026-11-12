@@ -278,7 +278,7 @@ export function IntakeFlow({ initialText = '', initialFiles, autoStart = false, 
       toast.success(`已录入 ${ids.length} 单`, {
         duration: 8000,
         action: { label: '订单卡', onClick: () => cards(ids) },
-        cancel: { label: '撤销', onClick: () => void deleteOrders(ids).then((ok) => ok && toast('已撤销，订单在回收站里')) },
+        cancel: { label: '撤销', onClick: () => void deleteOrders(ids, { reason: '撤销刚录入的订单' }).then((ok) => ok && toast('已撤销，订单在回收站里')) },
       })
       // 弹窗里录的单，确认后直接关掉回到订单；助手页保留结果方便接着录
       setDone(true)

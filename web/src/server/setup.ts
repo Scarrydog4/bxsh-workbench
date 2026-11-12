@@ -26,7 +26,7 @@ export const PRESET_ROLES = [
     name: '销售',
     locked: false,
     preset: true,
-    perms: ['order.view', 'order.create', 'order.edit', 'order.status', 'order.price', 'order.export', 'payment.create', 'aftersale.create', 'channel.view', 'node.edit', 'card.edit', 'statement.view', 'toolbox.use'],
+    perms: ['order.view', 'order.create', 'order.edit', 'order.status', 'order.price', 'order.delete', 'order.export', 'payment.create', 'aftersale.create', 'channel.view', 'node.edit', 'card.edit', 'statement.view', 'toolbox.use'],
     fields: { sales: true, writerPay: 'none', commission: 'own', profit: false, channelNo: true },
     rowScope: 'owned',
     sort: 1,
@@ -65,6 +65,13 @@ export async function migrateAndSeed(sql: ReturnType<typeof postgres>, migration
       if (r) await db.update(t.roles).set({ perms: Array.from(new Set([...r.perms, ...add])) }).where(eq(t.roles.id, id))
     }
     const values = [...(seed?.values ?? []), 'p2-perms']
+    await db.insert(t.options).values({ key: 'seeds', values }).onConflictDoUpdate({ target: t.options.key, set: { values } })
+  }
+  const [currentSeeds] = await db.select().from(t.options).where(eq(t.options.key, 'seeds'))
+  if (!currentSeeds?.values.includes('sales-delete-reason-20261112')) {
+    const [sales] = await db.select().from(t.roles).where(eq(t.roles.id, 'r-sales'))
+    if (sales) await db.update(t.roles).set({ perms: [...new Set([...sales.perms, 'order.delete'])] }).where(eq(t.roles.id, sales.id))
+    const values = [...(currentSeeds?.values ?? []), 'sales-delete-reason-20261112']
     await db.insert(t.options).values({ key: 'seeds', values }).onConflictDoUpdate({ target: t.options.key, set: { values } })
   }
 }

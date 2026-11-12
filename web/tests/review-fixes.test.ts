@@ -83,7 +83,7 @@ describe('2. 恢复订单也检查行范围', () => {
     expect((await acheng.act('order.restore', { ids: [other] })).status).toBe(404)
     expect((await boss.boot()).body.trash.some((x: { id: string }) => x.id === other)).toBe(true)
 
-    expect((await acheng.act('order.delete', { ids: [mine] })).status).toBe(200)
+    expect((await acheng.act('order.delete', { ids: [mine], reason: '重复录单' })).status).toBe(200)
     expect((await acheng.act('order.restore', { ids: [mine] })).status).toBe(200)
     expect(await order(acheng, mine)).toBeDefined()
     await boss.act('user.update', { id: 'u-acheng', patch: { roleId: 'r-sales' } })

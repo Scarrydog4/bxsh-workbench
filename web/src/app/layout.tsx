@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import './polish.css'
 
 export const metadata: Metadata = {
   title: '笔下工单',

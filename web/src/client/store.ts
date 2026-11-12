@@ -1,6 +1,8 @@
 'use client'
 
+import { celebrate } from './rewards/celebrate'
 import { clearReportCache } from './report-cache'
+import { invalidateAfterSaleTasks } from './query-client'
 import { useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import type { Boot, PublicUser } from '@/server/bootstrap'
@@ -39,7 +41,7 @@ export function pendingAfterSaleTasks(tasks:AfterSaleTask[]){
  return tasks.map(task=>{const current=known.get(task.id);return pending.reduce(previewTask,current?{...task,...current}:task)})
 }
 const listeners = new Set<() => void>()
-const emit = (change?:{orderIds?:string[]}) => { snapshot=null; listeners.forEach((l) => l()); if(change&&typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('bxsh:changed',{detail:change})) }
+const emit = (change?:{orderIds?:string[]}) => { snapshot=null; if(change)invalidateAfterSaleTasks(); listeners.forEach((l) => l()); if(change&&typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('bxsh:changed',{detail:change})) }
 function subscribe(l: () => void) {
   listeners.add(l)
   return () => listeners.delete(l)
@@ -361,11 +363,11 @@ export const revokePayment = async (id: string, paymentId: string, reason: strin
 export const revokeAdjustment = async (id: string, adjustmentId: string, reason: string) => ok(await change('order.revokeAdjustment', { id, adjustmentId, reason }))
 export const setOrderImportance = async (id: string, important: boolean, note = '') => ok(await change('order.setImportance', { id, important, note }))
 export const setOrderUrgency = async (id: string, urgent: boolean, note = '') => ok(await change('order.setUrgency', { id, urgent, note }))
-export const markDraft = async (id: string, proofIds: string[] = [], opts?: ActionOptions) => ok(await change('order.markDraft', { id, proofIds }, opts))
+export const markDraft = async (id: string, proofIds: string[] = [], opts?: ActionOptions) => { const done = ok(await change('order.markDraft', { id, proofIds }, opts)); if (done) celebrate({ kind: 'deliver', orderId: id }); return done }
 export const markDemo = async (id: string, proofIds: string[] = [], opts?: ActionOptions) => ok(await change('order.markDraft', { id, proofIds, mode: 'demo' }, opts))
-export async function deleteOrders(ids: string[], opts?: ActionOptions) {
+export async function deleteOrders(ids: string[], opts?: ActionOptions & { reason?: string }) {
   const requestScope = scope(), deleted = new Set(ids)
-  return ok(await change('order.delete', { ids }, {
+  return ok(await change('order.delete', { ids, reason: opts?.reason ?? '' }, {
     ...opts,
     onConfirmed: async () => {
       // Remove only after the server acknowledges. Do not wait for a slow full refresh.
@@ -380,6 +382,9 @@ export async function deleteOrders(ids: string[], opts?: ActionOptions) {
 export const restoreOrders = async (ids: string[], opts?: ActionOptions) => ok(await change('order.restore', { ids }, opts))
 
 export interface NewOrder {
+  inquiryId?: string
+  /** 替暂停的销售代录：ownerId 是那个销售 */
+  proxy?: boolean
   urgent?: boolean
   urgencyNote?: string
   title: string
@@ -395,7 +400,7 @@ export interface NewOrder {
   assignees: Assignee[]
   note: string
 }
-export const createOrder = (input: NewOrder, via?: string, opts?: ActionOptions) => change<{ id: string; no: string; title?: string }>('order.create', { ...input, via }, opts)
+export const createOrder = async (input: NewOrder, via?: string, opts?: ActionOptions) => { const r = await change<{ id: string; no: string; title?: string }>('order.create', { ...input, via }, opts); if (r?.id) celebrate({ kind: 'order', orderId: r.id }); return r }
 
 export const createChannel = (name: string, ownerId: string, avatar?: string) => change<{ id: string }>('channel.create', { name, ownerId, avatar })
 export const updateChannel = async (id: string, patch: { ownerId?: string; name?: string; note?: string }) => ok(await change('channel.update', { id, patch }))
@@ -407,6 +412,7 @@ export const createRole = (role: Omit<Role, 'id'>) => change<{ id: string }>('ro
 export const deleteRole = async (id: string) => ok(await change('role.delete', { id }))
 export const setUserRole = async (userId: string, roleId: string) => ok(await change('user.update', { id: userId, patch: { roleId } }))
 export const setUserCanWrite = async (userId: string, canWrite: boolean) => ok(await change('user.update', { id: userId, patch: { canWrite } }))
+export const setUserPaused = async (id: string, paused: boolean) => ok(await change('user.pause', { id, paused }))
 export const updateUser = async (userId: string, patch: Partial<{ name: string; commissionRate: number; writerRate: number; salesMode: SalesMode; active: boolean }>) => ok(await change('user.update', { id: userId, patch }))
 export const setUserAvatar = async (id: string, avatar: string) => ok(await change('user.avatar', { id, avatar }))
 /** Preview immediately; serialize this person's picks so a slower earlier save cannot win. */
@@ -439,11 +445,11 @@ export const setDefaultWriter = async (userId: string) => ok(await change('setti
 export const updateMe = async (name: string) => ok(await change('me.update', { name }))
 
 export const createAfterSale = (orderId: string, input: { reason: AfterSaleReason; req: string[]; shots: string[]; due?: string; extra: number; writerId?: string }) =>
-  change<{ id: string; round: number }>('aftersale.create', { orderId, ...input })
+  change<{ id: string; round: number }>('aftersale.create', { orderId, ...input }).then(r => { if (r?.id) celebrate({ kind: 'followup-new', orderId, afterSaleId: r.id }); return r })
 export const confirmAfterSaleHours = async(orderId:string,asId:string,hours:number) => ok(await change('aftersale.confirm',{orderId,asId,hours}))
 export const recallAfterSale = async(orderId:string,asId:string) => ok(await change('aftersale.recall',{orderId,asId}))
 export const confirmAfterSale = async (orderId: string, asId: string, due: string) => ok(await change('aftersale.confirm', { orderId, asId, due }))
-export const finishAfterSale = async (orderId: string, asId: string, proofIds: string[] = [], opts?: ActionOptions) => ok(await change('aftersale.finish', { orderId, asId, proofIds }, opts))
+export const finishAfterSale = async (orderId: string, asId: string, proofIds: string[] = [], opts?: ActionOptions) => { const done = ok(await change('aftersale.finish', { orderId, asId, proofIds }, opts)); if (done) celebrate({ kind: 'followup-done', orderId, afterSaleId: asId }); return done }
 export const nudgeAfterSale = async (orderId: string, asId: string) => ok(await change('aftersale.nudge', { orderId, asId }))
 export const setAfterSaleReason = async (orderId: string, asId: string, reason: AfterSaleReason, money: { extra?: number; charge?: number; requestId?: string } = {}) => ok(await change('aftersale.reason', { orderId, asId, reason, ...money }))
 export const updateAfterSale = async (orderId: string, asId: string, patch: { due?: string; writerId?: string }) => ok(await change('aftersale.update', { orderId, asId, ...patch }))
@@ -568,5 +574,5 @@ export async function logout() {
 
 export const bulkWriters=async(ids:string[],writerId:string,opts?:ActionOptions)=>change<{count:number}>('order.bulkWriters',{ids,writerId},opts)
 
-export const addOrderCost = async (id: string, data: { requestId: string; name: string; contractor: string; amount: number; date: string; note: string; proof?: string }) => ok(await change('order.addCost', { id, ...data }))
+export const addOrderCost = async (id: string, data: { requestId: string; name: string; contractor: string; contractorId?: string; amount: number; date: string; note: string; proof?: string }) => ok(await change('order.addCost', { id, ...data }))
 export const revokeOrderCost = async (id: string, costId: string, reason: string) => ok(await change('order.revokeCost', { id, costId, reason }))

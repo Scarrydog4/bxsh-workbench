@@ -27,10 +27,9 @@ export function SettingsPage() {
     <div className="grid gap-6">
       <PageHeader title="系统设置" sub="对所有人生效，改动记入审计日志" />
       <Section icon={<ListChecks size={16} />} title="选项" sub="拖动左边的点调整顺序；录单、筛选、看板都按这个顺序">
-        <div className="grid gap-4 md:grid-cols-2">
-          {OPTION_GROUPS.map((g) => (
-            <OptionList key={g.key} group={g} />
-          ))}
+        <div className="grid items-start gap-4 md:grid-cols-2">
+          <div className="grid content-start gap-4">{OPTION_GROUPS.filter(g => g.key !== 'types').map(g => <OptionList key={g.key} group={g} />)}</div>
+          <OptionList group={OPTION_GROUPS.find(g => g.key === 'types')!} />
         </div>
       </Section>
       <Section icon={<IdentificationCard size={16} />} title="需求卡片字段" sub="订单「需求」页签上的字段；停用的字段不再显示，已填的内容保留">

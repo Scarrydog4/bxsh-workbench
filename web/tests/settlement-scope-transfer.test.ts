@@ -81,8 +81,9 @@ it('跨渠道混批转交整张草稿作废保留历史，两边待结金额均�
   expect((await sql`select status,note from settle_batches where id=${draft.body.id}`)[0]).toMatchObject({ status: '已作废', note: expect.stringContaining('原草稿包含其他渠道') })
   const lines = await sql`select status,payee_id from settlements where batch_id=${draft.body.id}`
   expect(lines).toHaveLength(2); expect(lines.every(line => line.status === '已作废' && line.payee_id === 'u-acheng')).toBe(true)
-  expect((await candidates(boss, 'u-yang', '销售提成')).find(row => row.orderId === moved)?.remaining).toBe(40)
-  expect((await candidates(boss, 'u-acheng', '销售提成')).find(row => row.orderId === stays)?.remaining).toBe(40)
+  // 新建订单按现行 20% 销售份额计算；作废草稿不能占住应结金额。
+  expect((await candidates(boss, 'u-yang', '销售提成')).find(row => row.orderId === moved)?.remaining).toBe(20)
+  expect((await candidates(boss, 'u-acheng', '销售提成')).find(row => row.orderId === stays)?.remaining).toBe(20)
 })
 
 it('转老板自营时提成草稿作废，不生成老板提成', async () => {
@@ -93,12 +94,14 @@ it('转老板自营时提成草稿作废，不生成老板提成', async () => {
   expect(await candidates(boss, 'u-boss', '销售提成')).toEqual([])
 })
 
-it('提成不能超额保存；已有草稿在订单金额降低或删除后不能照旧确认', async () => {
+it('老板可自定提成金额，超额结算留痕；删除的订单仍不能确认旧草稿', async () => {
   const order = await create()
-  expect((await save([order], 'u-acheng', '销售提成', 41)).status).toBe(400)
-  const draft = await save([order], 'u-acheng', '销售提成', 40)
+  const draft = await save([order], 'u-acheng', '销售提成', 41)
+  expect(draft.status).toBe(200)
   expect((await boss.act('order.update', { id: order, patch: { basePrice: 60 }, note: '测试降价' })).status).toBe(200)
-  expect((await boss.act('settle.confirm', { id: draft.body.id })).status).toBe(400)
+  expect((await boss.act('settle.confirm', { id: draft.body.id })).status).toBe(200)
+  expect(Number((await sql`select amount from settlements where batch_id=${draft.body.id}`)[0].amount)).toBe(41)
+  expect((await sql`select note from audit where object_id=${draft.body.id} and action='确认结算单'`)[0].note).toContain('超')
   const deleted = await create(), old = await save([deleted])
   expect((await boss.act('order.delete', { ids: [deleted] })).status).toBe(200)
   expect((await boss.act('settle.confirm', { id: old.body.id })).status).toBe(404)

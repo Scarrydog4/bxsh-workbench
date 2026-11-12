@@ -22,6 +22,7 @@ export function providerMessage(code: string) {
     configuration: '请管理员在服务设置中更新写作牛登录凭据',
     session_expired: '写作牛登录已过期，请管理员重新微信登录并更新凭据',
     unauthorized: '写作牛登录已失效，请管理员更新凭据',
+    account_mismatch: '请使用工作台原来绑定的写作牛账号扫码，本次未更换账号',
     membership_expired: '写作牛账号尚未开通会员或会员已过期，请开通后刷新连接',
     permission_denied: '当前写作牛会员不支持这个模式，请更换模式或升级会员',
     quota_exceeded: '写作牛账号额度不足，请管理员查看账号',
@@ -124,6 +125,13 @@ export async function rewriteConnection(override?: string) {
 export async function saveRewriteCredential(value: string) {
   const token = tokenValue(value)
   const status = await rewriteConnection(token)
+  // 先由写作牛验证新令牌，再核对原绑定账号；过期令牌仍保留账号标识。
+  const identity = (value: string) => {
+    try { return String(JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString()).user_id ?? '') } catch { return '' }
+  }
+  let previous: string | undefined
+  try { previous = await credential() } catch { /* 首次配置 */ }
+  if (previous && (!identity(previous) || identity(previous) !== identity(token))) throw new ProviderError('account_mismatch', true)
   const file = credentialFile()
   await mkdir(path.dirname(file), { recursive: true })
   const temp = `${file}.${crypto.randomUUID()}.tmp`

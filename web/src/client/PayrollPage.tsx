@@ -28,6 +28,8 @@ import { OperationStatus, useOperationFeedback } from './operation-feedback'
 import { SettlementNote } from './SettlementNote'
 import { CustLight, defaultPay, PayButton } from './PayButton'
 import { IncomeDateFilter, incomePreset, matchesIncomeDate, type IncomeDateSelection } from './IncomeDateFilter'
+import { request } from './work-materials/data'
+import { payable as rewardPayable, signedAmount, type QualityReview } from '@/shared/work-materials'
 
 /** 两期规则满足时服务端给出建议额，有建议额才算现在可发。老板仍可手工发放。 */
 const canPayNow = (l: PayLine) => l.due !== null && (l.suggest ?? 0) > 0
@@ -238,6 +240,20 @@ const unfinished = new Map<string, IncomeBatchInput>()
 
 function BatchPay({ person, kind, lines, onClose, onDone }: { person: PublicUser; kind: PayKind; lines: PayLine[]; onClose: () => void; onDone: () => void }) {
   const { me } = useSession()
+  // 写手没结的奖惩：默认跟这次工资一起结，奖励加、罚款扣；取不到就当没有，不影响发工资
+  const [allRewards, setAllRewards] = useState<QualityReview[]>([])
+  useEffect(() => {
+    if (kind !== '写手工资') return
+    let alive = true
+    request<QualityReview[]>('/api/reviews').then(list => { if (alive && Array.isArray(list)) setAllRewards(list) }, () => {})
+    return () => { alive = false }
+  }, [kind, person.id])
+  const pendingRewards = allRewards.filter(r => r.writerId === person.id && rewardPayable(r))
+  // 罚款写手还没回复或你还没确认的，这次先不扣
+  const waitingFines = allRewards.filter(r => r.writerId === person.id && r.kind === 'penalty' && !!r.amount && !r.revokedAt && !r.settledAt && r.status !== 'done').length
+  const [withRewards, setWithRewards] = useState(true)
+  const rewardNet = sumMoney(pendingRewards.map(signedAmount))
+  const [includeRewards, setIncludeRewards] = useState(false)
   const key = `${me.id}:${person.id}:${kind}:${lines.map(l => l.id).sort().join(',')}`
   const saved = unfinished.get(key)
   const [amounts, setAmounts] = useState<Record<string, string>>(() => Object.fromEntries(lines.map(l => [l.id, String(saved?.lines.find(x => x.orderId === l.id)?.amount ?? defaultPay(l))])))
@@ -254,12 +270,17 @@ function BatchPay({ person, kind, lines, onClose, onDone }: { person: PublicUser
   const payable = parsed.filter(l => l.amount > 0)
   const valid = parsed.every(l => amounts[l.orderId] === '' || amounts[l.orderId] === '0' || (Number.isFinite(l.amount) && l.amount >= 0 && Math.abs(l.amount * 100 - Math.round(l.amount * 100)) < 1e-7)) && payable.length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today
   const total = sumMoney(payable.map(l => l.amount))
+  // 罚款比这次工资还多时不一起结，留到下次
+  const rewardsFit = pendingRewards.length > 0 && sumMoney([total, rewardNet]) >= 0
+  useEffect(() => setIncludeRewards(withRewards && rewardsFit), [withRewards, rewardsFit])
+  const transfer = includeRewards ? sumMoney([total, rewardNet]) : total
 
   async function submit() {
     if (working.current || reading.current || (!saved && !valid)) return
     working.current = true
     setBusy(true)
-    const input = saved ?? { requestId: crypto.randomUUID(), kind, payeeId: person.id, lines: payable, date, note, shots }
+    const rewardNote = includeRewards ? `奖惩一起结：${pendingRewards.map(r => `${r.category || (r.kind === 'reward' ? '奖励' : '罚款')} ${r.kind === 'reward' ? '+' : '−'}${money(r.amount ?? 0)}`).join('，')}；合计 ${rewardNet >= 0 ? '+' : '−'}${money(Math.abs(rewardNet))}，实际转账 ${money(transfer)}` : ''
+    const input = saved ?? { requestId: crypto.randomUUID(), kind, payeeId: person.id, lines: payable, date, note: [note.trim(), rewardNote].filter(Boolean).join('\n'), shots }
     unfinished.set(key, input)
     try {
       const ok = await feedback.run(async report => {
@@ -271,6 +292,12 @@ function BatchPay({ person, kind, lines, onClose, onDone }: { person: PublicUser
         }
         unfinished.delete(key)
         toast.success(`结算已记录：${person.name} ${money(outcome.result.amount)} · ${outcome.result.count} 单`)
+        if (includeRewards) {
+          try {
+            await request('/api/reviews/settle', 'POST', { writerId: person.id, ids: pendingRewards.map(r => r.id) })
+            toast.success(`奖惩已一起结清：${rewardNet >= 0 ? '+' : '−'}${money(Math.abs(rewardNet))}，实际转账 ${money(transfer)}`)
+          } catch (err) { toast.error(`工资已记，奖惩没结上：${(err as Error).message}，请到奖惩页核对`) }
+        }
         return true
       }, { saving: '正在记录合并结算', success: '合并结算已记录' })
       if (ok) onDone()
@@ -290,13 +317,22 @@ function BatchPay({ person, kind, lines, onClose, onDone }: { person: PublicUser
       </div>
       <div className="flex items-center gap-2">
         <input aria-label="结算日期" type="date" max={today} value={date} disabled={busy || !!saved} onChange={e => setDate(e.target.value)} className={cn(inputCls, 'h-8 w-36 text-xs')}/>
-        <span className="ml-auto text-sm">合计 <strong className="num font-medium">{money(total)}</strong></span>
+        <span className="ml-auto text-sm">{includeRewards ? '工资' : '合计'} <strong className="num font-medium">{money(total)}</strong></span>
       </div>
+      {pendingRewards.length > 0 && <div className="rounded-md border px-3 py-2 text-sm">
+        <label className="flex items-center gap-2"><Checkbox checked={withRewards} disabled={busy || !!saved} onCheckedChange={on => setWithRewards(on === true)}/>
+          <span>一起结清 {pendingRewards.length} 条奖惩</span>
+          <span className={cn('num ml-auto font-medium', rewardNet < 0 ? 'text-danger' : 'text-gold')}>{rewardNet >= 0 ? '+' : '−'}{money(Math.abs(rewardNet))}</span></label>
+        {withRewards && <ul className="mt-1.5 space-y-0.5 pl-6 text-xs text-muted-foreground">{pendingRewards.map(r => <li key={r.id} className="flex gap-2"><span className="min-w-0 flex-1 truncate" title={r.issue}>{[r.category, r.issue.split('\n')[0]].filter(Boolean).join(' · ')}</span><span className="num">{r.kind === 'reward' ? '+' : '−'}{money(r.amount ?? 0)}</span></li>)}</ul>}
+        {includeRewards && <p className="mt-1.5 text-right">实际转账 <strong className="num font-medium">{money(transfer)}</strong></p>}
+        {withRewards && !rewardsFit && <p className="mt-1.5 text-xs text-warn">罚款比这次工资多，留到下次</p>}
+      </div>}
+      {waitingFines > 0 && <p className="text-xs text-muted-foreground">另有 {waitingFines} 条罚款还没确认，这次不扣</p>}
       <SettlementNote note={note} shots={shots} onNote={setNote} onShots={setShots} onReading={v => { reading.current = v; setReading(v) }} disabled={busy || !!saved} label="结算备注" placeholder="备注（可选，可粘贴转账截图）"/>
       <OperationStatus state={feedback.state}/>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" disabled={busy} onClick={onClose}>取消</Button>
-        <Button aria-busy={busy} disabled={busy || reading.current || (!saved && !valid)} onClick={() => void submit()}>{feedback.state.status === 'success' ? <><Check size={16}/>结算已记录</> : busy ? <><CircleNotch size={16} className="animate-spin motion-reduce:animate-none"/>正在保存…</> : saved ? '重试这笔' : `确认结算 ${money(total)}`}</Button>
+        <Button aria-busy={busy} disabled={busy || reading.current || (!saved && !valid)} onClick={() => void submit()}>{feedback.state.status === 'success' ? <><Check size={16}/>结算已记录</> : busy ? <><CircleNotch size={16} className="animate-spin motion-reduce:animate-none"/>正在保存…</> : saved ? '重试这笔' : includeRewards ? `确认结算，转 ${money(transfer)}` : `确认结算 ${money(total)}`}</Button>
       </div>
     </DialogContent>
   </Dialog>

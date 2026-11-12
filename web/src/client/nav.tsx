@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import type { Prefill } from '@/shared/parse'
 import type { CardKind } from './Cards'
 
-export type Page = 'cases' | 'talk' | 'reviews' | 'home' | 'tasks' | 'aftersales' | 'orders' | 'channels' | 'toolbox' | 'income' | 'roles' | 'audit' | 'trash' | 'assistant' | 'settle' | 'settings' | 'forum' | 'dm'
+export type Page = 'inquiries' | 'contractors' | 'cases' | 'talk' | 'reviews' | 'home' | 'tasks' | 'aftersales' | 'orders' | 'channels' | 'toolbox' | 'income' | 'roles' | 'audit' | 'trash' | 'assistant' | 'settle' | 'settings' | 'forum' | 'dm'
 
 export interface Nav {
   page: Page

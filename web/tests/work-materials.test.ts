@@ -5,7 +5,7 @@ import { GET as getArchive } from '@/app/api/materials/[id]/gallery/route'
 import { POST as publish, PUT as updateMaterial, GET as library } from '@/app/api/materials/route'
 import { POST as category } from '@/app/api/materials/categories/route'
 import { GET as download } from '@/app/api/materials/[id]/file/route'
-import { PATCH as favorite } from '@/app/api/materials/[id]/route'
+import { PATCH as favorite, DELETE as remove } from '@/app/api/materials/[id]/route'
 import { GET as cover } from '@/app/api/materials/[id]/image/route'
 import { GET as list, POST as create } from '@/app/api/reviews/route'
 import { POST as transition } from '@/app/api/reviews/[id]/route'
@@ -31,6 +31,30 @@ beforeAll(async () => {
   image = 'data:image/png;base64,'+(await sharp({create:{width:32,height:48,channels:3,background:'#bac'}}).png().toBuffer()).toString('base64')
 })
 afterAll(closeDb)
+it('销售与写手共同维护话术，彼此可查看全部分类；仅查看角色不能改素材', async () => {
+  const name = '共同维护验收'
+  expect((await category(req(writer,{action:'add',name},'?kind=talk'),params)).status).toBe(200)
+  const entry={id:'shared-talk',kind:'talk',title:'交付说明',category:name,content:'写手填写交付说明'}
+  expect((await publish(req(writer,entry),params)).status).toBe(200)
+  expect((await updateMaterial(req(sales,{...entry,content:'销售补充发群说明'}),params)).status).toBe(200)
+  for(const actor of [boss,sales,writer]) {
+    const rows=await (await library(req(actor,undefined,'?kind=talk'),params)).json()
+    expect(rows).toContainEqual(expect.objectContaining({id:entry.id,category:name,content:'销售补充发群说明'}))
+  }
+  const role=await boss.act('role.save',{name:'素材只读',perms:['order.view'],rowScope:'all',fields:{sales:false,writerPay:'none',commission:'none',profit:false,channelNo:false}})
+  expect(role.status).toBe(200)
+  await sql`insert into users (id,name,account,role_id,can_write,password_hash,must_change_password) select 'u-library-reader','素材只读','library-reader',${role.body.id},false,password_hash,false from users where id='u-boss'`
+  const reader=await as('library-reader'), ctx={params:Promise.resolve({id:entry.id})}
+  expect((await library(req(reader,undefined,'?kind=talk'),params)).status).toBe(200)
+  expect((await publish(req(reader,{...entry,id:'forbidden-talk'}),params)).status).toBe(403)
+  expect((await updateMaterial(req(reader,entry),ctx)).status).toBe(403)
+  expect((await remove(req(reader),ctx)).status).toBe(403)
+  expect((await category(req(reader,{action:'add',name:'不能新增'}),params)).status).toBe(403)
+  expect((await publish(new Request('http://test.local/api/materials',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(entry)}),params)).status).toBe(401)
+  expect((await remove(req(sales),ctx)).status).toBe(200)
+  const audit=await sql`select actor_id,action from audit where object_type='material' and object_id=${entry.id} order by id`
+  expect(audit.map(row=>[row.actor_id,row.action])).toEqual([['u-xiao','发布素材'],['u-acheng','编辑素材'],['u-acheng','移除素材']])
+})
 it('复盘可只写文字，之后的回复图片仍可按权限查看', async () => {
   const id = crypto.randomUUID(), ctx = {params:Promise.resolve({id})}
   const entry = {id,orderId,writerId:'u-xiao',title:'文字复盘',issue:'请核对交付清单'}
@@ -61,11 +85,11 @@ it('发起复盘支持五张有序图片；超过五张被拒绝，原有单图�
   expect((await screenshot(req(writer,undefined,'?v='+'0'.repeat(64)),ctx)).status).toBe(404)
   await sql`delete from quality_reviews where id=${id}`
 })
-it('销售可以收藏、下载案例，不能发布，收藏按账号隔离', async () => {
+it('销售发布案例、写手可共同编辑，收藏仍按账号隔离', async () => {
   const entry = {id:'material-qa',kind:'case',title:'测试案例',major:'计算机',category:'系统开发',content:'案例介绍',image}
   expect((await category(req(boss,{action:'add',name:entry.category}),params)).status).toBe(200)
-  expect((await publish(req(sales,entry),params)).status).toBe(403)
-  expect((await publish(req(boss,entry),params)).status).toBe(200)
+  expect((await publish(req(sales,entry),params)).status).toBe(200)
+  expect((await updateMaterial(req(writer,{...entry,content:'写手补充案例说明'}),params)).status).toBe(200)
   const ctx = {params:Promise.resolve({id:entry.id})}
   expect((await favorite(req(sales,{favorite:true}),ctx)).status).toBe(200)
   for (const [actor, starred] of [[sales,true],[writer,false]] as const) {
@@ -76,8 +100,7 @@ it('销售可以收藏、下载案例，不能发布，收藏按账号隔离', a
 })
 it('自定义分类、单附件和简化发布一起保存；移除分类仍能取回原文件', async () => {
   const name = '演示文件'
-  expect((await category(req(sales,{action:'add',name}),params)).status).toBe(403)
-  expect((await category(req(boss,{action:'add',name}),params)).status).toBe(200)
+  expect((await category(req(sales,{action:'add',name}),params)).status).toBe(200)
   const form = new FormData()
   Object.entries({id:'minimal-case',kind:'case',content:'案例介绍首行\n详情',category:name,image}).forEach(([key,value]) => form.set(key,value))
   form.set('file',new Blob(['example data']),'对应文件.txt')
@@ -86,10 +109,10 @@ it('自定义分类、单附件和简化发布一起保存；移除分类仍能�
   const ctx = {params:Promise.resolve({id:'minimal-case'})}
   expect(await (await download(req(sales),ctx)).text()).toBe('example data')
   expect((await download(new Request('http://test.local'),ctx)).status).toBe(401)
-  expect((await category(req(boss,{action:'rename',name,next:'新版分类'}),params)).status).toBe(200)
+  expect((await category(req(writer,{action:'rename',name,next:'新版分类'}),params)).status).toBe(200)
   const rows = async () => (await (await library(req(sales),params)).json()).find((x:{id:string})=>x.id==='minimal-case')
   expect(await rows()).toMatchObject({title:'案例介绍首行',fileName:'对应文件.txt',category:'新版分类'})
-  expect((await category(req(boss,{action:'remove',name:'新版分类'}),params)).status).toBe(200)
+  expect((await category(req(sales,{action:'remove',name:'新版分类'}),params)).status).toBe(200)
   expect(await rows()).toMatchObject({category:'未分类'})
   expect(await (await download(req(sales),ctx)).text()).toBe('example data')
   form.set('category','未分类'); form.set('id','multiple-files'); form.append('file',new Blob(['second']),'2.mod')

@@ -253,6 +253,27 @@
       "when": 1793870400004,
       "tag": "0035_review_images_settlement_dates",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794434400000,
+      "tag": "0036_expected_deposit_channel_weekly",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794434400001,
+      "tag": "0037_proxy_entry_writer_rewards",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794434400002,
+      "tag": "0038_business_backlog",
+      "breakpoints": true
     }
   ]
 }

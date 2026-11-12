@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { orderListSummary } from '@/shared/order-list-summary'
 import { migrateOrderDefaultColumns, migratePayrollDefaultColumns, migrateChannelDefaultColumns, ORDER_DEFAULT_COLUMNS } from '@/shared/table-default-layouts'
-import { taskTodaySummary } from '@/shared/task-today-summary'
+import { taskPendingOrders, taskTodaySummary } from '@/shared/task-today-summary'
 import type { OrderView } from '@/shared/types'
 
 describe('订单销售额统一口径', () => {
@@ -62,4 +62,24 @@ describe('今天截止统一为当前人员和搜索范围内的订单', () => {
       expect(taskTodaySummary([demo, pending], [demo, pending], day, new Set(), userId)).toEqual({ left: 1, done: 0, total: 1 })
     }
   })
+})
+
+
+it('开跟进前后原单仍留在今天截止，跟进交完也不改变原单截止与交付状态', () => {
+ const day='2026-11-06'
+ const order={id:'own',status:'未交付',dueDate:day,orderDate:'2026-11-05',assignees:[{userId:'mine',pay:100}],afterSales:[],writerPayPlan:'full'} as unknown as OrderView
+ const followup={id:'follow',orderId:'own',writerId:'mine',start:'2026-11-06T01:00:00Z',due:'2026-11-07T01:00:00Z',doneAt:null,cancelledAt:null} as any
+ const before=structuredClone(order)
+ for(const userId of ['mine',undefined]) {
+  for(const tasks of [[],[followup],[{...followup,doneAt:'2026-11-06T02:00:00Z'}]]) {
+   const result=taskPendingOrders([{...order,afterSales:tasks}],tasks,userId)
+   expect(result.orders.map(row=>row.id)).toEqual(['own'])
+   expect(taskTodaySummary(result.orders,[order],day,result.pendingGroupIds,userId)).toEqual({left:1,done:0,total:1})
+  }
+ }
+ expect(order).toEqual(before)
+ const completed={...order,status:'已交付',draftAt:'2026-11-06T00:00:00Z'}
+ expect(taskPendingOrders([completed],[followup],'mine').orders).toEqual([])
+ expect(taskPendingOrders([completed],[followup]).orders).toEqual([])
+ expect(taskPendingOrders([{...order,assignees:[{userId:'other',pay:100}]}],[followup],'mine').orders).toEqual([])
 })

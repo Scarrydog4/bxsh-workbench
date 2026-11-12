@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { PAGE_PATHS, ADMIN_PAGES, sidebarPage } from './page-route'
 import { usePref } from './prefs'
 import { useAfterSaleTasks } from './after-sale-data'
@@ -8,7 +9,7 @@ import {
   House,
   ListChecks,
   Sparkle,
-  ClipboardText, Images, ArrowCounterClockwise,
+  ClipboardText, Images, Scales,
   Storefront,
   Wallet,
   Toolbox,
@@ -54,8 +55,9 @@ const isDrawer = (entry: NavEntry): entry is NavDrawer => 'items' in entry
 const MAIN: NavEntry[] = [
   { page: 'home', label: '工作台', icon: House },
   { page: 'orders', label: '订单', icon: ClipboardText, perm: 'order.view' },
+  { page: 'inquiries', label: '意向单', icon: ClipboardText, perm: 'order.create' },
   { page: 'channels', label: '渠道', icon: Storefront, perm: 'channel.view' },
-  { page: 'reviews', label: '复盘', icon: ArrowCounterClockwise, show: x => x.role.locked || (x.can('order.view') && x.me.canWrite) },
+  { page: 'reviews', label: '奖惩', icon: Scales, show: x => x.role.locked || (x.can('order.view') && x.me.canWrite) },
   { page: 'tasks', label: '任务', icon: ListChecks, perm: 'order.view' },
   { id: 'materials', label: '素材', icon: Images, items: [
     { page: 'cases', label: '案例', icon: ImageSquare, perm: 'order.view' },
@@ -63,6 +65,7 @@ const MAIN: NavEntry[] = [
   ] },
   { id: 'finance', label: '财务', icon: Bank, items: [
     { page: 'income', label: '收入', icon: Wallet },
+    { page: 'contractors', label: '外包合作方', icon: Storefront, show: x => x.role.locked },
     { page: 'settle', label: '工资结算', icon: Coins, show: (x) => x.can('settle.manage') },
   ] },
   { page: 'toolbox', label: '工具箱', icon: Toolbox, perm: 'toolbox.use' },
@@ -105,6 +108,7 @@ export function Logo({ compact }: { compact?: boolean }) {
 }
 
 function NavList({ collapsed, onPick }: { collapsed?: boolean; onPick?: () => void }) {
+  const router = useRouter()
   const { page, prepare, preload } = useNav()
   const workspaceReady = useWorkspaceStatus() === 'ready'
   const ses = useSession()
@@ -137,11 +141,11 @@ function NavList({ collapsed, onPick }: { collapsed?: boolean; onPick?: () => vo
         const btn = (
           <Link
             href={PAGE_PATHS[i.page]}
-            prefetch
+            prefetch={false}
             key={i.page}
             data-nav={i.page}
-            onPointerEnter={() => preload?.(i.page)}
-            onFocus={() => preload?.(i.page)}
+            onPointerEnter={() => { if (!active && workspaceReady) { preload?.(i.page); router.prefetch(PAGE_PATHS[i.page]) } }}
+            onFocus={() => { if (!active && workspaceReady) { preload?.(i.page); router.prefetch(PAGE_PATHS[i.page]) } }}
             aria-label={i.page === 'reviews' && reviewCount ? label + '，' + reviewCount + ' 条待处理' : label}
             aria-current={active ? 'page' : undefined}
             onNavigate={() => {
@@ -186,7 +190,7 @@ function NavList({ collapsed, onPick }: { collapsed?: boolean; onPick?: () => vo
           <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cn('flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring wide:h-9 wide:text-sm', !open && holdsActive ? 'text-foreground' : 'text-muted-foreground')}>
             <Icon size={17} className={cn('shrink-0', !open && holdsActive && 'text-primary')}/><span className="flex-1 text-left">{entry.label}</span><CaretDown size={13} className={cn('transition-transform', !open && '-rotate-90')} />
           </button>
-          {open && <div className="flex flex-col gap-0.5 pl-3">{render(visible)}</div>}
+          <div className="nav-disclosure" data-open={open} inert={!open} aria-hidden={!open}><div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-0.5 pl-3">{render(visible)}</div></div></div>
         </div>
       })}
     </nav>

@@ -1,5 +1,5 @@
 import type { Order } from './types'
-import { calc, cents, customerStage, ownerCommission, sumMoney } from './calc'
+import { calc, cents, customerStage, ownerCommission, proxyFee, sumMoney } from './calc'
 import { paydayKey } from './format'
 
 /** 每单、每人、每种收入的应得和实发。草稿不占用，交付记录不限制发放。 */
@@ -18,6 +18,11 @@ export function dueItems(o: Order, kind: SettleKind, payeeId: string, adminIds: 
     if (a?.pay) out.push({ amount: a.pay, period: paydayKey(o.draftAt) })
     for (const x of o.afterSales) if (x.writerId === payeeId && x.extra > 0) out.push({ amount: x.extra, period: paydayKey(x.start) })
     return out
+  }
+  if (o.salesMode !== 'cost' && o.proxyId === payeeId && o.ownerId !== payeeId) {
+    const c = calc(o, adminIds)
+    const fee = c.isSelf || c.payPending ? 0 : proxyFee(o, c.commission)
+    return fee > 0 ? [{ amount: fee, period: null }] : []
   }
   if (o.salesMode === 'cost' || o.ownerId !== payeeId) return []
   const c = calc(o, adminIds)
@@ -48,7 +53,7 @@ export function entitlement(o: Order, kind: SettleKind, payeeId: string, adminId
     if (a?.pay === null) return null
     if (!a && !o.afterSales.some(x => x.writerId === payeeId && x.extra > 0)) return settled(o, kind, payeeId)
   } else {
-    if (o.ownerId !== payeeId) return settled(o, kind, payeeId)
+    if (o.ownerId !== payeeId && o.proxyId !== payeeId) return settled(o, kind, payeeId)
     if (o.salesMode !== 'cost' && calc(o, adminIds).payPending) return null
   }
   return sumMoney(dueItems(o, kind, payeeId, adminIds).map(d => d.amount))

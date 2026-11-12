@@ -3,6 +3,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { CasePreview } from './CasePreview'
 import { copyCaseImage } from './case-image-copy'
 import { Categories } from './Categories'
+import { ChoiceRail } from '@/components/ui/choice-rail'
 import { useState } from 'react'
 import { Star, CopySimple, Check, DownloadSimple, FileZip, Paperclip, PencilSimple, MagnifyingGlass, Plus, GearSix, DotsThree, TextAlignLeft } from '@phosphor-icons/react'
 import { motion, useReducedMotion } from 'motion/react'
@@ -19,14 +20,14 @@ const toolbarIcon = 'inline-grid size-9 shrink-0 place-items-center rounded-md t
 
 const actionIcon = 'inline-grid size-9 shrink-0 place-items-center rounded-md text-primary hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring'
 
-function Copy({ entry, className = actionIcon }: { entry: Material; className?: string }) {
+function Copy({ entry, className = actionIcon, showLabel = false }: { entry: Material; className?: string; showLabel?: boolean }) {
   const feedback = useCopyFeedback(entry.id + entry.content)
   const copied = feedback.state === 'copied'
   const label = copied ? '已复制' : entry.kind === 'case' ? '复制文案' : '复制话术'
   const Idle = entry.kind === 'case' ? TextAlignLeft : CopySimple
   return <button type="button" className={className} aria-label={label} title={label} onClick={async () => {
     if (await feedback.copy(() => navigator.clipboard.writeText(entry.content)) === false) toast.error('复制失败，请手动选择文字')
-  }}>{copied ? <Check size={18} aria-hidden/> : <Idle size={18} aria-hidden/>}</button>
+  }}>{copied ? <Check size={18} aria-hidden/> : <Idle size={18} aria-hidden/>}{showLabel && <span>{label}</span>}</button>
 }
 function SaveImage({ entry, index = 0 }: { entry: Material; index?: number }) {
   const label = entry.images.length > 1 ? (index ? '保存这张图' : '保存封面') : '保存图片'
@@ -44,17 +45,17 @@ function TalkBrowser({ rows, edit }: { rows: Material[]; edit?: (entry: Material
   const [selected, select] = useState<string>()
   const current = rows.find(x => x.id === selected) ?? rows[0]
   return <div className="grid overflow-hidden rounded-xl border bg-card md:h-[min(640px,calc(100dvh-340px))] md:min-h-[320px] md:grid-cols-[240px_minmax(0,1fr)]">
-    <nav aria-label="话术列表" className="max-h-44 space-y-0.5 overflow-auto border-b p-1.5 md:max-h-none md:border-b-0 md:border-r">
+    <ChoiceRail role="navigation" aria-label="话术列表" className="max-h-44 space-y-0.5 overflow-auto border-b p-1.5 md:max-h-none md:border-b-0 md:border-r">
       {rows.map(x => <button key={x.id} type="button" aria-current={x.id === current.id} onClick={() => select(x.id)}
         className={'block w-full rounded-md px-3 py-2 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring '+(x.id === current.id ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted')} title={x.title}><span className="block truncate">{x.title}</span><span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">{x.category}</span></button>)}
-    </nav>
+    </ChoiceRail>
     <article className="relative flex min-h-64 min-w-0 flex-col">
-      <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 px-5 pt-2">
+      <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
         <div className="min-w-0"><h3 className="break-words font-semibold">{current.title}</h3><span className="text-xs text-muted-foreground">{current.category}</span></div>
         {edit && <button type="button" className={actionIcon} aria-label="编辑话术" title="编辑话术" onClick={() => edit(current)}><PencilSimple size={17} aria-hidden/></button>}
       </header>
-      <p className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-5 pb-16 text-sm leading-7 [overflow-wrap:anywhere]">{current.content}</p>
-      <div className="absolute bottom-3 right-3"><Copy key={current.id} entry={current} /></div>
+      <p key={current.id} className="polish-content-enter min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-5 py-5 text-sm leading-7 [overflow-wrap:anywhere]">{current.content}</p>
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t bg-muted/20 px-5 py-3"><span className="text-xs text-muted-foreground">复制后可直接粘贴发送</span><Copy key={current.id} entry={current} showLabel className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:bg-primary/15" /></footer>
     </article>
   </div>
 }
@@ -80,8 +81,8 @@ function Card({ entry, preview, edit, reload }: { entry: Material; preview: (ind
     try { await request('/api/materials/' + entry.id, 'PATCH', { favorite: !entry.favorite }); reload() }
     catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
-  return <article className="group relative min-w-0 overflow-hidden rounded-xl border bg-card transition-colors hover:border-primary/40">
-    <button type="button" aria-label={'查看'+entry.title} onClick={() => preview(0)} className="block aspect-[16/10] w-full bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+  return <article className="case-card group relative min-w-0 overflow-hidden rounded-xl border bg-card transition-colors hover:border-primary/40">
+    <button type="button" aria-label={'查看'+entry.title} onClick={() => preview(0)} className="case-cover block aspect-[16/10] w-full overflow-hidden bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
       {entry.images[0] && <img src={entry.images[0]+'&thumb=1'} alt="" loading="lazy" className="size-full object-cover"/>}
     </button>
     {entry.images.length > 1 && <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/65 px-1.5 text-xs leading-5 text-white">{entry.images.length} 张</span>}

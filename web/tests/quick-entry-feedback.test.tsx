@@ -10,7 +10,7 @@ vi.mock('react', async () => ({
 vi.mock('motion/react', () => ({ AnimatePresence: 'presence', motion: { span: 'motion-span', div: 'motion-div' }, useReducedMotion: () => h.reduce }))
 vi.mock('@/client/store', () => ({
   useSession: () => ({ s: { users: [{ id: 'boss', name: '老板' }], channels: [{ id: 'channel', name: '渠道' }], types: [] }, me: { id: 'boss' }, role: { locked: true }, adminIds: new Set(['boss']), views: [], can: () => true }),
-  createOrder: vi.fn(), addPayment: vi.fn(), uploadFiles: vi.fn(), salesPeople: () => [], createChannel: vi.fn(),
+  createOrder: vi.fn(), addPayment: vi.fn(), uploadFiles: vi.fn(), salesPeople: () => [], createChannel: vi.fn(), setOrderImportance: vi.fn(),
 }))
 vi.mock('@/client/nav', () => ({ useNav: () => ({ openOrder: vi.fn(), cards: vi.fn() }) }))
 vi.mock('@/client/prefs', () => ({ usePref: () => [h.keepGoing, vi.fn()] }))
@@ -22,7 +22,7 @@ vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), succe
 
 import { QuickEntry } from '@/client/QuickEntry'
 import { IntakePayment } from '@/client/IntakePayment'
-import { createOrder, addPayment, uploadFiles } from '@/client/store'
+import { createOrder, addPayment, uploadFiles, setOrderImportance } from '@/client/store'
 import { markFresh } from '@/client/fresh'
 import { toast } from 'sonner'
 
@@ -170,10 +170,11 @@ it('录单有新填内容时也不提示，直接关闭', () => {
   expect(closed).toHaveBeenCalledExactlyOnceWith(false)
 })
 
-it('快速成功不残留加载，连续录单保留渠道计数，关闭回执后恢复名称焦点', async () => {
+it('快速成功不残留加载，连续录单保留渠道计数，关闭回执后回到层次选择', async () => {
   h.keepGoing = true
   fill()
-  const focus = vi.fn(); find('q-title').props.ref.current = { focus }
+  // 连续录单从「层次」开始：按 Z/B/N 选完再跳到订单名称
+  const focus = vi.fn(); find('q-level').props.ref.current = { focus }
   await save()
   expect(text(feedback())).toContain('已完成')
   expect(saveButton().props['aria-busy']).toBe(false)
@@ -225,4 +226,21 @@ it('减少动态效果下保留阶段文字，取消旋转、计数位移和截�
   const count = nodes(render()).find(n => n.type === 'motion-span')
   expect(count.props.initial).toEqual({ opacity: 0 })
   expect(text(count)).toContain('本次已录 1 单')
+})
+
+it('录单先选专科、勾「重要」：订单名带「专」，建好后用同一单号标记重要并带上说明', async () => {
+  vi.mocked(setOrderImportance).mockResolvedValue(true)
+  fill()
+  nodes(render()).find(n => n.props.role === 'radio' && text(n).includes('专科')).props.onClick()
+  nodes(render()).find(n => n.type === 'button' && n.props['aria-pressed'] !== undefined && text(n).includes('重要')).props.onClick()
+  nodes(render()).find(n => n.props['aria-label'] === '重要说明').props.onChange({ target: { value: '同学介绍的单' } })
+  await save()
+  expect(vi.mocked(createOrder).mock.calls[0][0]).toMatchObject({ title: '专 保留的订单' })
+  expect(setOrderImportance).toHaveBeenCalledExactlyOnceWith('order-1', true, '同学介绍的单')
+})
+
+it('没勾「重要」不额外调用标记', async () => {
+  fill()
+  await save()
+  expect(setOrderImportance).not.toHaveBeenCalled()
 })

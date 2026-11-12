@@ -3,8 +3,9 @@ import { PageLoading } from './PageLoading'
 import { isStagedWriterPay, writerGroupDone } from '@/shared/writer-stages'
 import { taskPendingOrders, taskTodaySummary } from '@/shared/task-today-summary'
 import { needsDeadline } from '@/shared/order-deadline'
-import { HeaderBar, Segmented } from './controls'
-import { TableFooter, TablePageHeader } from './table-kit'
+import { Segmented } from './controls'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DataTable, TableFooter, TablePageHeader, type Col } from './table-kit'
 import { OrderProgress } from './OrderProgress'
 import { OrderBadges } from './OrderUrgency'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -15,11 +16,11 @@ import type { OrderView } from '@/shared/types'
 import type { AfterSaleTask } from '@/shared/aftersale-task'
 import { businessDate, daysUntil, money, payday, shortDate, today } from '@/shared/format'
 import { incomeRowsInPayPeriod, incomeSummary } from '@/shared/income'
-import { confirmationState } from '@/shared/as-rules'
+import { afterSaleState, confirmationState } from '@/shared/as-rules'
 import { canAdjustDeadline } from '@/shared/perm'
 import { useSession, updateOrder, loadIncome } from './store'
 import { useNav } from './nav'
-import { Avatar, ChannelAvatar, Empty, inputCls } from './ui'
+import { Avatar, ChannelName, Empty, inputCls } from './ui'
 import { DatePicker } from './DatePicker'
 import { useAfterSaleTasks, useTaskClock } from './after-sale-data'
 import { TaskCountdown, TaskAction, isUrgent } from './TaskCard'
@@ -63,6 +64,36 @@ const asOpen = (a: AfterSaleTask) => !a.doneAt && !a.cancelledAt
 const asLate = (a: AfterSaleTask, now: number) => asOpen(a) && confirmationState(a, now) !== 'waiting' && new Date(a.due).getTime() <= now
 /** 行内按钮平时隐藏，鼠标移上、键盘选中、弹层打开时出现；触屏一直显示 */
 const hoverOnly = 'opacity-0 transition-opacity group-hover/row:opacity-100 group-data-[selected=true]/row:opacity-100 focus-within:opacity-100 [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
+/** 次要操作（填截止、进度、复制名称）不常驻占位，移上或选中时才出现，避免挤窄标题 */
+const hoverShow = 'hidden group-hover/row:inline-flex group-data-[selected=true]/row:inline-flex [&:has([data-state=open])]:inline-flex [@media(hover:none)]:inline-flex'
+/** 两栏共用同一套列：序号 · 时间 · 两行内容 · 操作，行高一致，左右对得齐 */
+const ROW = 'group/row relative grid min-h-[46px] grid-cols-[24px_76px_minmax(0,1fr)_auto] items-center gap-x-2 border-b px-3 py-1.5 text-sm transition-colors hover:bg-accent/50 data-[selected=true]:bg-primary/[0.07] data-[selected=true]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]'
+
+/** 跟进按到点时间分组，和左栏同一套分组条 */
+const FOLLOWUP_BUCKETS: { id: Bucket; label: string }[] = [
+  { id: 'late', label: '逾期' },
+  { id: 'today', label: '今天到点' },
+  { id: 'tomorrow', label: '明天到点' },
+  { id: 'week', label: '7 天内' },
+  { id: 'later', label: '以后' },
+]
+
+function RowNo({ n }: { n: number }) {
+  return <span className="num text-right text-xs text-muted-foreground/70" aria-label={`第 ${n} 条`}>{n}</span>
+}
+
+/** 每条最多两行：第一行标题，第二行灰色备注，写不下就截断，悬停看全文 */
+function RowText({ badges, title, tone, sub, subTitle, onOpen }: { badges: ReactNode; title: string; tone: string; sub: string; subTitle?: string; onOpen: () => void }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1">
+        {badges}
+        <button type="button" data-open onClick={onOpen} title={title} className={cn('min-w-0 truncate text-left leading-5 hover:text-primary', tone)}>{title}</button>
+      </div>
+      <p className="truncate text-xs leading-4 text-muted-foreground" title={subTitle ?? (sub || undefined)}>{sub || ' '}</p>
+    </div>
+  )
+}
 
 /** 跟进按到点时间落到哪一天，用于标题深浅和「今天截止」计数 */
 const asBucket = (a: AfterSaleTask, now: number): Bucket => {
@@ -118,9 +149,6 @@ export function TasksPage() {
   const scopeUser = writer ? me.id : who === 'all' ? undefined : who
   const visibleDrafts = views.filter(v => (!scopeUser || v.assignees.some(a => a.userId === scopeUser)) && hit(v.title, channel(v.channelId)?.name, v.progressNote, v.type))
   const todayDrafts = taskTodaySummary(draftRows, visibleDrafts, todayKey, pendingGroupIds, scopeUser)
-  const lateCount = draftRows.filter(lateDraft).length + asRows.filter((a) => asLate(a, now)).length
-  const todayFollowups = asRows.filter(a => asOpen(a) && asBucket(a, now) === 'today').length
-  const openCount = asRows.filter(asOpen).length
 
   useEffect(() => {
     let leader = 0
@@ -160,36 +188,29 @@ export function TasksPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
-      <TablePageHeader title="任务" lead={<TaskTabs view="tasks" />} summary={
-        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-          {lateCount > 0 && <span className="font-medium text-danger">逾期 {lateCount}</span>}
-          {todayDrafts.total > 0 && <span className="text-warn">初稿今天截止 {todayDrafts.total}</span>}
-          {todayFollowups > 0 && <span className="text-warn">跟进今天到点 {todayFollowups}</span>}
-          <span>待交付 {draftRows.length}</span>
-          <span>跟进 {openCount}</span>
-        </span>
-      }>
-        {writer && <WageLink />}
+      {/* 顶部只留一行：视图切换、搜索、按写手看。各项计数只在两栏的栏头和分组条里出现一次 */}
+      <TablePageHeader title="任务" lead={<TaskTabs view="tasks" />}>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {showWho && <Segmented label="按写手看" size="sm" value={who} onChange={setWho}
+            items={[...writerIds.map((p) => [p.id, <>
+              <Avatar user={user(p.id)} size={18} />{user(p.id)?.name ?? '—'}
+              <span className="num text-muted-foreground">{p.n}</span>
+              {p.late > 0 && <span className="num rounded-full bg-danger/10 px-1.5 text-[11px] font-medium leading-4 text-danger" title={`逾期 ${p.late}`}>{p.late}</span>}
+            </>] as const), ['all', '全部'] as const]} />}
+          <label className="relative">
+            <MagnifyingGlass size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input ref={search} aria-label="搜索任务" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜订单、渠道、要求" className={cn(inputCls, 'h-8 w-52 pl-8 pr-8')} />
+            {!query && <span className="kbd pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">/</span>}
+          </label>
+          {writer && <WageLink />}
+        </div>
       </TablePageHeader>
-      <HeaderBar>
-        <label className="relative">
-          <MagnifyingGlass size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input ref={search} aria-label="搜索任务" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜订单、渠道、要求" className={cn(inputCls, 'h-8 w-52 pl-8 pr-8')} />
-          {!query && <span className="kbd pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">/</span>}
-        </label>
-        {showWho && <Segmented label="按写手看" size="sm" className="-my-1.5 py-1.5" value={who} onChange={setWho}
-          items={[...writerIds.map((p) => [p.id, <>
-            <Avatar user={user(p.id)} size={18} />{user(p.id)?.name ?? '—'}
-            <span className="num text-muted-foreground">{p.n}</span>
-            {p.late > 0 && <span className="num rounded-full bg-danger/10 px-1.5 text-[11px] font-medium leading-4 text-danger" title={`逾期 ${p.late}`}>{p.late}</span>}
-          </>] as const), ['all', '全部'] as const]} />}
-      </HeaderBar>
       <Selection.Provider value={{ sel, pick: setSel }}>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
           <TasksSplit key={me.id}
-            left={<DraftColumn key={who} rows={draftRows} ids={draftRows.map((v) => v.id)} showWriter={!writer} userId={writer ? me.id : who === 'all' ? undefined : who} pendingGroupIds={pendingGroupIds} deliveredToday={todayDrafts.done} />}
+            left={<DraftTable key={who} rows={draftRows} showWriter={!writer} userId={writer ? me.id : who === 'all' ? undefined : who} pendingGroupIds={pendingGroupIds} deliveredToday={todayDrafts.done} />}
             right={<div className="flex min-w-0 max-lg:order-first lg:min-h-0 [&>section]:flex-1">
-              <AfterSaleColumn tasks={asRows} now={now} showWriter={!writer} />
+              <FollowupTable tasks={asRows} now={now} showWriter={!writer} />
             </div>} />
         </div>
       </Selection.Provider>
@@ -223,7 +244,7 @@ function Column({ title, count, extra, children, footer, compact = false }: { ti
 function GroupHeader({ bucket, count, open, onToggle, hint, children }: { bucket: (typeof BUCKETS)[number]; count: number; open: boolean; onToggle: () => void; hint?: string; children?: ReactNode }) {
   return (
     <button type="button" aria-expanded={open} onClick={onToggle}
-      className="sticky top-0 z-10 flex h-8 w-full items-center gap-2 border-b bg-muted/80 px-4 text-left text-xs font-medium backdrop-blur supports-[backdrop-filter]:bg-muted/60">
+      className="sticky top-0 z-10 flex h-8 w-full items-center gap-2 border-b bg-muted/80 px-3 text-left text-xs font-medium backdrop-blur supports-[backdrop-filter]:bg-muted/60">
       <CaretRight size={11} weight="bold" className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
       <span className={cn('h-2 w-2 shrink-0 rounded-full', bucket.dot)} />
       <span className={bucket.text}>{bucket.label}</span>
@@ -244,49 +265,6 @@ function TodayMeter({ done, left }: { done: number; left: number }) {
       </span>
       已交 <span className="num">{done}</span> · 待交 <span className="num">{left}</span>
     </span>
-  )
-}
-
-function DraftColumn({ rows, ids, showWriter, userId, pendingGroupIds, deliveredToday }: { rows: OrderView[]; ids: string[]; showWriter: boolean; userId?: string; pendingGroupIds: Set<string>; deliveredToday: number }) {
-  const [saved, save] = useDevicePref<Partial<Record<Bucket, boolean>>>('tasks-open-groups', {})
-  const isOpen = (b: Bucket) => saved[b] ?? OPEN_BY_DEFAULT[b]
-  const groups = BUCKETS.map((b) => ({ bucket: b, rows: rows.filter((v) => bucketOf(v, pendingGroupIds.has(v.id)) === b.id) }))
-  const dateHint = (offset: number) => {
-    const d = today()
-    d.setDate(d.getDate() + offset)
-    return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEK[d.getDay()]}`
-  }
-  return (
-    <Column title="待交付" count={rows.length}>
-      {rows.length || deliveredToday ? groups.map(({ bucket, rows: list }) => {
-        const isToday = bucket.id === 'today'
-        if (!list.length && !(isToday && deliveredToday)) return null
-        const open = isOpen(bucket.id)
-        return (
-          <div key={bucket.id}>
-            <GroupHeader bucket={bucket} count={list.length + (isToday ? deliveredToday : 0)} open={open} onToggle={() => save({ ...saved, [bucket.id]: !open })}
-              hint={isToday ? dateHint(0) : bucket.id === 'tomorrow' ? dateHint(1) : undefined}>
-              {isToday && <TodayMeter done={deliveredToday} left={list.length} />}
-            </GroupHeader>
-            <AnimatePresence initial={false}>
-              {open && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
-                  {isToday && !list.length ? (
-                    <div className="flex items-center gap-2 border-b px-4 py-3 text-sm text-muted-foreground"><Magnolia size={22} />今天截止的都交了</div>
-                  ) : (
-                    <AnimatePresence initial={false}>
-                      {list.map((v) => <DraftRow key={v.id} v={v} ids={ids} bucket={bucket.id} showWriter={showWriter} userId={userId} />)}
-                    </AnimatePresence>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )
-      }) : (
-        <Empty icon={<ClipboardText size={20} />} title="订单都交付了" />
-      )}
-    </Column>
   )
 }
 
@@ -311,46 +289,6 @@ function DueMark({ v, bucket }: { v: OrderView; bucket: Bucket }) {
   )
 }
 
-function DraftRow({ v, ids, bucket, showWriter, userId }: { v: OrderView; ids: string[]; bucket: Bucket; showWriter: boolean; userId?: string }) {
-  const { can, me, role, user, channel } = useSession()
-  const { openOrder, afterSale } = useNav()
-  const activeFollowup = v.afterSales.find(a => !a.doneAt && !a.cancelledAt && canSeeAfterSale({ ownerId: v.ownerId, deletedAt: null }, a, me, role))
-  const key = `d:${v.id}`
-  const { selected, pick } = useRow(key)
-  const canDraft = can('order.draft') && (role.locked || v.assignees.some((a) => a.userId === me.id))
-  const ch = channel(v.channelId)
-  const writerId = userId ?? v.assignees.find(a => !writerGroupDone(v, a.userId))?.userId
-  const w = writerId ? user(writerId) : undefined
-  const late = bucket === 'late'
-  // 逾期、今天、待发群的「交付」常驻，其余移上去才出现
-  const pinned = late || bucket === 'today' || bucket === 'group' || bucket === 'final'
-  return (
-    <motion.div exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }} data-task-row={key} data-selected={selected} onClick={pick}
-      className={cn('group/row relative grid min-h-11 grid-cols-[44px_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 border-b px-4 py-2 text-sm transition-colors hover:bg-accent/50 data-[selected=true]:bg-primary/[0.07] data-[selected=true]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]', v.urgency && 'bg-warn/5')}>
-      {(late || v.urgency) && <span aria-hidden className={cn('absolute inset-y-0 left-0 w-[3px]', late ? 'bg-danger' : 'bg-warn')} />}
-      <span className="row-span-2 pt-1"><DueMark v={v} bucket={bucket} /></span>
-      <div className="flex min-w-0 flex-wrap items-start gap-1.5">
-        <OrderBadges v={v} />
-        <button type="button" data-open onClick={() => openOrder(v.id, ids)} className={cn('min-w-0 flex-1 whitespace-normal break-words text-left leading-5 hover:text-primary', titleTone(bucket))} title={v.title}>{v.title}</button>
-        <span className="shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 max-sm:hidden [@media(hover:none)]:opacity-100"><CopyOrderName title={v.title} /></span>
-        {v.progressNote && <span className="min-w-0 basis-full break-words text-xs text-muted-foreground" title={`进度：${v.progressNote}`}>{v.progressNote}</span>}
-      </div>
-      <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-2">
-        <span className={cn('flex items-center gap-1', hoverOnly)}>
-          {needsDeadline(v) && can('order.edit') && <DatePicker plain value={null} placeholder="填截止" label={`给 ${v.no} 填截止`} className="!mx-0 !w-auto text-xs text-primary" onChange={(day) => day && void updateOrder(v.id, { dueDate: day })} />}
-          {canAdjustDeadline(v, me, role) && <span data-progress><OrderProgress v={v} compact /></span>}
-        </span>
-        {activeFollowup ? <span data-deliver><button type="button" className="inline-flex h-7 items-center gap-1 text-xs text-primary hover:underline" title="这单正在跟进，请在跟进中交付" onClick={() => afterSale(activeFollowup.id)}>查看跟进<CaretRight size={12}/></button></span> : canDraft && <span data-deliver className={cn(!pinned && hoverOnly)}><DeliverButton kind="draft" userId={userId} orderId={v.id} no={v.no} /></span>}
-        {ch && <span className="hidden w-24 min-w-0 items-center gap-1.5 text-xs text-muted-foreground 2xl:flex" title={ch.name}><ChannelAvatar channel={ch} size={16} /><span className="truncate">{ch.name}</span></span>}
-        {ch && <span className="2xl:hidden" title={ch.name}><ChannelAvatar channel={ch} size={16} /></span>}
-        {showWriter && (w
-          ? <span title={w.name} className="flex w-7 shrink-0 justify-center"><Avatar user={w} size={20} /></span>
-          : <span title="未派写手" className="flex w-7 shrink-0 justify-center"><span className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/60" /></span>)}
-      </div>
-    </motion.div>
-  )
-}
-
 export function AfterSaleColumn({ tasks, now, showWriter, compact = false }: { tasks: AfterSaleTask[]; now: number; showWriter: boolean; compact?: boolean }) {
   const { order, me } = useSession()
   const [tab, setTab] = useState('live')
@@ -363,7 +301,11 @@ export function AfterSaleColumn({ tasks, now, showWriter, compact = false }: { t
     })
   const doneToday = tasks.filter((a) => a.doneAt && dayOf(a.doneAt) === todayKey)
   const waiting = open.filter((a) => confirmationState(a, now) === 'waiting' && a.writerId === me.id).length
-  const late = open.filter((a) => asLate(a, now)).length
+  const [saved, save] = useDevicePref<Partial<Record<Bucket, boolean>>>('tasks-open-followup-groups', {})
+  const groups = FOLLOWUP_BUCKETS
+    .map((b) => ({ bucket: { ...BUCKETS.find((x) => x.id === b.id)!, label: b.label }, rows: open.filter((a) => asBucket(a, now) === b.id) }))
+    .filter((g) => g.rows.length)
+  const numbers = new Map(groups.flatMap((g) => g.rows).map((a, i) => [a.id, i + 1]))
   // 每天的记录：当天发布或当天交付的跟进
   const days = useMemo(() => {
     const m = new Map<string, Set<string>>()
@@ -385,35 +327,40 @@ export function AfterSaleColumn({ tasks, now, showWriter, compact = false }: { t
       compact={compact}
       extra={<>
         {waiting > 0 && <span className="text-warn">待确认 {waiting}</span>}
-        {late > 0 && <span className="font-medium text-danger">逾期 {late}</span>}
         {doneToday.length > 0 && <span className="text-muted-foreground">今天已交 {doneToday.length}</span>}
+        {/* 记录原来是底部一排日期页签，收进栏头的下拉，栏头和左栏同高 */}
+        {days.length > 0 && (
+          <Select value={tab} onValueChange={setTab}>
+            <SelectTrigger aria-label="查看进行中或某天的跟进记录" className="-my-1 h-7 w-auto gap-1 border-transparent px-2 text-xs shadow-none hover:border-border">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="live">进行中</SelectItem>
+              {days.map(([k, set]) => (
+                <SelectItem key={k} value={k}>{k === todayKey ? '今天' : shortDate(k).replace('月', '.').replace('日', '')} 的记录 · {set.size}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </>}
-      footer={
-        <div className="scroll-hidden flex shrink-0 items-center gap-1 overflow-x-auto border-t bg-muted/40 px-2 py-1.5">
-          <TabBtn on={tab === 'live'} onClick={() => setTab('live')}>
-            进行中
-          </TabBtn>
-          {days.length > 0 && <span className="shrink-0 px-1.5 text-xs text-muted-foreground">记录</span>}
-          {days.map(([k, set]) => (
-            <TabBtn key={k} on={tab === k} onClick={() => setTab(k)}>
-              {k === todayKey ? '今天' : shortDate(k).replace('月', '.').replace('日', '')}
-              <span className="num ml-1 text-muted-foreground">{set.size}</span>
-            </TabBtn>
-          ))}
-        </div>
-      }
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={tab} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
           {tab === 'live' ? (
             open.length || doneToday.length ? (
               <>
-                {open.map((a) => (
-                  <LiveRow key={a.id} a={a} now={now} showWriter={showWriter} />
-                ))}
-                {!open.length && <div className="flex items-center gap-2 border-b px-4 py-3 text-sm text-muted-foreground"><Magnolia size={22} />跟进都交完了</div>}
+                {groups.map(({ bucket, rows }) => {
+                  const isOpen = saved[bucket.id] ?? true
+                  return (
+                    <div key={bucket.id}>
+                      <GroupHeader bucket={bucket} count={rows.length} open={isOpen} onToggle={() => save({ ...saved, [bucket.id]: !isOpen })} />
+                      {isOpen && rows.map((a) => <LiveRow key={a.id} a={a} n={numbers.get(a.id)!} now={now} showWriter={showWriter} />)}
+                    </div>
+                  )
+                })}
+                {!open.length && <div className="flex items-center gap-2 border-b px-3 py-3 text-sm text-muted-foreground"><Magnolia size={22} />跟进都交完了</div>}
                 {doneToday.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground last:border-b-0">
+                  <div key={a.id} className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground last:border-b-0">
                     <Check size={13} weight="bold" className="shrink-0" />
                     <span className="min-w-0 flex-1 truncate" title={a.title}>
                       {a.title}{a.round > 1 && ` · 第 ${a.round} 轮`}
@@ -434,7 +381,7 @@ export function AfterSaleColumn({ tasks, now, showWriter, compact = false }: { t
   )
 }
 
-function LiveRow({ a, now, showWriter }: { a: AfterSaleTask; now: number; showWriter: boolean }) {
+function LiveRow({ a, n, now, showWriter }: { a: AfterSaleTask; n: number; now: number; showWriter: boolean }) {
   const { me, user, channel, order } = useSession()
   const { afterSale } = useNav()
   const key = `a:${a.id}`
@@ -445,25 +392,20 @@ function LiveRow({ a, now, showWriter }: { a: AfterSaleTask; now: number; showWr
   const urgency = order(a.orderId)?.urgency
   const req = a.req.join('；') || (a.shots.length ? '见截图' : '')
   return (
-    <div data-task-row={key} data-selected={selected} onClick={pick}
-      className={cn('group/row relative border-b px-4 py-2 transition-colors hover:bg-accent/50 data-[selected=true]:bg-primary/[0.07] data-[selected=true]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]', urgency && 'bg-warn/5')}>
+    <div data-task-row={key} data-selected={selected} onClick={pick} className={cn(ROW, urgency && 'bg-warn/5')}>
       {(late || urgency) && <span aria-hidden className={cn('absolute inset-y-0 left-0 w-[3px]', late ? 'bg-danger' : 'bg-warn')} />}
-      {/* 窄屏放不下：倒计时和按钮一行，订单名另起一行 */}
-      <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="w-[92px] shrink-0"><TaskCountdown a={a} now={now} short /></span>
-        <OrderBadges v={order(a.orderId) ?? {}} />
-        <button type="button" data-open onClick={() => afterSale(a.id)} className={cn('order-1 min-w-0 basis-full whitespace-normal break-words text-left text-sm leading-5 hover:text-primary', titleTone(asBucket(a, now)))} title={a.title}>{a.title}</button>
-        <span className="shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100 [@media(hover:none)]:opacity-100"><CopyOrderName title={a.title} /></span>
-        {a.round > 1 && <span className="shrink-0 rounded bg-muted px-1.5 text-xs text-muted-foreground">第 {a.round} 轮</span>}
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          {!waiting && <span data-deliver className={cn(!(late || isUrgent(a, now)) && hoverOnly)}><TaskAction a={a} /></span>}
-          {ch && <span title={ch.name}><ChannelAvatar channel={ch} size={16} /></span>}
-          {showWriter && <span title={user(a.writerId)?.name} className="flex w-7 shrink-0 justify-center"><Avatar user={user(a.writerId)} size={20} /></span>}
-        </span>
-      </div>
-      {req && <p className="mt-1 whitespace-normal break-words text-xs text-muted-foreground" title={req}>{req}</p>}
+      <RowNo n={n} />
+      <span className="min-w-0"><TaskCountdown a={a} now={now} short /></span>
+      <RowText badges={<OrderBadges v={order(a.orderId) ?? {}} />} title={a.title} tone={titleTone(asBucket(a, now))} onOpen={() => afterSale(a.id)}
+        sub={[a.round > 1 ? `第 ${a.round} 轮` : '', req, ch?.name].filter(Boolean).join(' · ')} subTitle={req || undefined} />
+      <span className="flex shrink-0 items-center justify-end gap-2">
+        <span className={cn('items-center', hoverShow)}><CopyOrderName title={a.title} /></span>
+        {!waiting && <span data-deliver className={cn(!(late || isUrgent(a, now)) && hoverOnly)}><TaskAction a={a} label="交付" /></span>}
+        {showWriter && <span title={user(a.writerId)?.name} className="flex w-7 shrink-0 justify-center"><Avatar user={user(a.writerId)} size={20} /></span>}
+      </span>
+      {/* 写手要先回复预计完成时间：确认面板占整行，放在两行内容下面 */}
       {waiting && (
-        <div className="mt-2 min-w-0">
+        <div className="col-span-full mt-1.5 min-w-0 pl-8">
           <ConfirmationPanel orderId={a.orderId} a={a} now={now} />
         </div>
       )}
@@ -477,7 +419,7 @@ function RecordRow({ a, day }: { a: AfterSaleTask; day: string }) {
   const late = (a.deliveredLateMin ?? 0) > 0
   const result = a.cancelledAt ? '已撤回' : a.doneAt ? (late ? `逾期 ${Math.round(a.deliveredLateMin! / 60) || 1} 小时交付` : '按时交付') : '还没交付'
   return (
-    <div className="flex items-center gap-3 border-b px-4 py-2 text-sm last:border-b-0">
+    <div className="flex items-center gap-3 border-b px-3 py-2 text-sm last:border-b-0">
       <span className={cn('w-[92px] shrink-0 text-xs', late ? 'text-danger' : !a.doneAt && !a.cancelledAt ? 'text-foreground' : 'text-muted-foreground')}>{result}</span>
       <span className="min-w-0 flex-1 truncate" title={a.title}>
         {a.title} {a.round > 1 && <span className="text-xs text-muted-foreground">第 {a.round} 轮</span>}
@@ -489,14 +431,6 @@ function RecordRow({ a, day }: { a: AfterSaleTask; day: string }) {
       </span>
       <Avatar user={user(a.writerId)} size={18} />
     </div>
-  )
-}
-
-function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} className={cn('inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-xs transition-colors', on ? 'bg-card text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground')}>
-      {children}
-    </button>
   )
 }
 
@@ -514,5 +448,215 @@ function WageLink() {
       {pending > 0 && <span className="text-xs text-muted-foreground">另 {pending} 项未定</span>}
       <CaretRight size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
+  )
+}
+
+// ---------- 两栏表格：待交付 / 跟进 ----------
+
+/** 选中行整行着色；单元格自带底色，所以要落到 td 上 */
+const rowTone = (selected: boolean, warn: boolean) => cn(
+  selected ? '[&>td]:!bg-primary/[0.08]' : warn && '[&>td]:bg-warn/5')
+// 订单名最多两行，再长才截断；悬停看全文
+const cellTitle = 'min-w-0 flex-1 line-clamp-2 break-all text-left leading-5 hover:text-primary hover:underline underline-offset-4'
+
+/** 分组开关：一排带数量的小按钮，既是汇总也是筛选；点一下收起或展开这一组 */
+function BucketChips({ groups, isOpen, toggle, children }: { groups: { bucket: (typeof BUCKETS)[number]; count: number }[]; isOpen: (b: Bucket) => boolean; toggle: (b: Bucket) => void; children?: ReactNode }) {
+  return (
+    <div role="group" aria-label="按时间分组显示" className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5">
+      {groups.map(({ bucket, count }) => (
+        <button key={bucket.id} type="button" aria-pressed={isOpen(bucket.id)} onClick={() => toggle(bucket.id)} title={isOpen(bucket.id) ? `收起「${bucket.label}」` : `展开「${bucket.label}」`}
+          className={cn('inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            isOpen(bucket.id) ? 'border-border bg-card font-medium shadow-sm' : 'border-transparent text-muted-foreground hover:bg-accent')}>
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', bucket.dot)} />
+          <span className={isOpen(bucket.id) ? bucket.text : undefined}>{bucket.label}</span>
+          <span className="num font-normal text-muted-foreground">{count}</span>
+        </button>
+      ))}
+      {children}
+    </div>
+  )
+}
+
+function GroupLabel({ bucket, count, hint, children }: { bucket: (typeof BUCKETS)[number]; count: number; hint?: string; children?: ReactNode }) {
+  return (
+    <span className="flex items-center gap-2 text-xs">
+      <span className={cn('h-2 w-2 shrink-0 rounded-full', bucket.dot)} />
+      <span className={bucket.text}>{bucket.label}</span>
+      <span className="num font-normal text-muted-foreground">{count}</span>
+      {children}
+      {hint && <span className="num ml-auto font-normal text-muted-foreground">{hint}</span>}
+    </span>
+  )
+}
+
+function DraftTable({ rows, showWriter, userId, pendingGroupIds, deliveredToday }: { rows: OrderView[]; showWriter: boolean; userId?: string; pendingGroupIds: Set<string>; deliveredToday: number }) {
+  const { can, me, role, user, channel } = useSession()
+  const { openOrder, afterSale } = useNav()
+  const { sel, pick } = useContext(Selection)
+  const [saved, save] = useDevicePref<Partial<Record<Bucket, boolean>>>('tasks-open-groups', {})
+  const isOpen = (b: Bucket) => saved[b] ?? OPEN_BY_DEFAULT[b]
+  const bucketById = useMemo(() => new Map(rows.map((v) => [v.id, bucketOf(v, pendingGroupIds.has(v.id))])), [rows, pendingGroupIds])
+  const groups = BUCKETS.map((b) => ({ bucket: b, rows: rows.filter((v) => bucketById.get(v.id) === b.id) })).filter((g) => g.rows.length)
+  // 序号按显示顺序连续编，跨分组不重置；收起的分组也占号，展开收起时号码不变
+  const ordered = groups.flatMap((g) => g.rows)
+  const numbers = useMemo(() => new Map(ordered.map((v, i) => [v.id, i + 1])), [ordered.map((v) => v.id).join()]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = ordered.filter((v) => isOpen(bucketById.get(v.id)!))
+  const ids = shown.map((v) => v.id)
+  const dateHint = (offset: number) => {
+    const d = today()
+    d.setDate(d.getDate() + offset)
+    return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEK[d.getDay()]}`
+  }
+  const cols: Col<OrderView>[] = [
+    // 默认宽度按 1440 屏左栏（约 690px）排满不出横向滚动；屏幕更宽时表格自动按比例拉开
+    { id: 'no', header: '#', size: 36, minSize: 32, hideable: false, cell: (v) => <RowNo n={numbers.get(v.id) ?? 0} /> },
+    { id: 'due', header: '截止', size: 64, minSize: 56, cell: (v) => <DueMark v={v} bucket={bucketById.get(v.id) ?? 'later'} /> },
+    { id: 'order', header: '订单', size: 186, minSize: 120, hideable: false, grow: true, cell: (v) => (
+      <div className="flex min-w-0 items-center gap-1">
+        <OrderBadges v={v} />
+        <button type="button" data-open onClick={(e) => { e.stopPropagation(); pick(`d:${v.id}`); openOrder(v.id, ids) }} title={v.title} className={cn(cellTitle, titleTone(bucketById.get(v.id) ?? 'later'))}>{v.title}</button>
+        <CopyOrderName title={v.title} />
+      </div>
+    ) },
+    { id: 'progress', header: '进度', size: 110, grow: true, cell: (v) => (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 line-clamp-2 break-all text-xs leading-4 text-muted-foreground" title={v.progressNote || undefined}>{v.progressNote || '—'}</span>
+        {/* 只留铅笔图标，文字给进度内容让位；悬停有「填写当前进度」提示 */}
+        {canAdjustDeadline(v, me, role) && <span data-progress className="shrink-0 [&_button>span]:sr-only" onClick={(e) => e.stopPropagation()}><OrderProgress v={v} compact /></span>}
+      </div>
+    ) },
+    { id: 'channel', header: '渠道', size: 140, minSize: 60, cell: (v) => <ChannelName channel={channel(v.channelId)} size={18} /> },
+    ...(showWriter ? [{ id: 'writer', header: '写手', size: 56, minSize: 44, cell: (v: OrderView) => {
+      const writerId = userId ?? v.assignees.find((a) => !writerGroupDone(v, a.userId))?.userId
+      const w = writerId ? user(writerId) : undefined
+      // 只放头像，名字悬停可见，省出位置给「交付」
+      return w ? <span title={w.name} className="flex justify-center"><Avatar user={w} size={20} /></span> : <span title="未派写手" className="flex justify-center"><span className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/60" /></span>
+    } }] : []),
+    { id: 'actions', header: '操作', size: 116, minSize: 96, hideable: false, cell: (v) => {
+      const activeFollowup = v.afterSales.find((a) => !a.doneAt && !a.cancelledAt && canSeeAfterSale({ ownerId: v.ownerId, deletedAt: null }, a, me, role))
+      const canDraft = can('order.draft') && (role.locked || v.assignees.some((a) => a.userId === me.id))
+      return (
+        <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          {activeFollowup
+            ? <span data-deliver><button type="button" className="inline-flex h-7 items-center gap-1 text-xs text-primary hover:underline" title="这单正在跟进，请在跟进中交付" onClick={() => afterSale(activeFollowup.id)}>查看跟进<CaretRight size={12} /></button></span>
+            : canDraft && <span data-deliver><DeliverButton kind="draft" userId={userId} orderId={v.id} no={v.no} /></span>}
+          {needsDeadline(v) && can('order.edit') && <DatePicker plain value={null} placeholder="填截止" label={`给 ${v.no} 填截止`} className="!mx-0 !w-auto text-xs text-primary" onChange={(day) => day && void updateOrder(v.id, { dueDate: day })} />}
+        </span>
+      )
+    } },
+  ]
+  const todayDone = deliveredToday > 0 && !groups.some((g) => g.bucket.id === 'today')
+  return (
+    <section className="flex min-w-0 flex-col bg-card max-lg:border-b lg:h-full lg:min-h-0">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4 text-sm font-medium">
+        待交付 <span className="num font-normal text-muted-foreground">{rows.length}</span>
+        {shown.length < rows.length && <span className="text-xs font-normal text-muted-foreground">显示 {shown.length}</span>}
+      </header>
+      {rows.length > 0 && <BucketChips groups={groups.map((g) => ({ bucket: g.bucket, count: g.rows.length }))} isOpen={isOpen} toggle={(b) => save({ ...saved, [b]: !isOpen(b) })}>
+        {todayDone && <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Magnolia size={18} />今天截止的 {deliveredToday} 单都交了</span>}
+      </BucketChips>}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DataTable fill id="tasks-drafts" freeze={3} toolbar={() => null} rows={shown} rowId={(v) => v.id} cols={cols}
+          onRowClick={(v) => pick(`d:${v.id}`)}
+          rowAttrs={(v) => ({ 'data-task-row': `d:${v.id}`, 'data-selected': sel === `d:${v.id}` })}
+          rowClassName={(v) => rowTone(sel === `d:${v.id}`, !!v.urgency || bucketById.get(v.id) === 'late')}
+          groupBy={(v) => bucketById.get(v.id) ?? 'later'}
+          groupLabel={(key) => {
+            const g = groups.find((x) => x.bucket.id === key)
+            if (!g) return key
+            return <GroupLabel bucket={g.bucket} count={g.rows.length} hint={key === 'today' ? dateHint(0) : key === 'tomorrow' ? dateHint(1) : undefined}>
+              {key === 'today' && <TodayMeter done={deliveredToday} left={g.rows.length} />}
+            </GroupLabel>
+          }}
+          empty={rows.length ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">分组都收起了，点上面的分组按钮展开</div> : <Empty icon={<ClipboardText size={20} />} title="订单都交付了" />} />
+      </div>
+    </section>
+  )
+}
+
+function FollowupTable({ tasks, now, showWriter }: { tasks: AfterSaleTask[]; now: number; showWriter: boolean }) {
+  const { order, me, user } = useSession()
+  const { afterSale } = useNav()
+  const { sel, pick } = useContext(Selection)
+  const [tab, setTab] = useState('live')
+  const todayKey = businessDate(new Date())
+  const at = (x: AfterSaleTask) => new Date(confirmationState(x, now) === 'waiting' ? x.confirmBy! : x.due).getTime()
+  const open = tasks.filter(asOpen).sort((a, b) => Number(!!order(b.orderId)?.urgency) - Number(!!order(a.orderId)?.urgency) || at(a) - at(b))
+  const doneToday = tasks.filter((a) => a.doneAt && dayOf(a.doneAt) === todayKey)
+  const waitingMine = (a: AfterSaleTask) => confirmationState(a, now) === 'waiting' && a.writerId === me.id
+  const waiting = open.filter(waitingMine).length
+  const [saved, save] = useDevicePref<Partial<Record<Bucket, boolean>>>('tasks-open-followup-groups', {})
+  const isOpen = (b: Bucket) => saved[b] ?? true
+  const bucketById = new Map(open.map((a) => [a.id, asBucket(a, now)]))
+  const groups = FOLLOWUP_BUCKETS
+    .map((b) => ({ bucket: { ...BUCKETS.find((x) => x.id === b.id)!, label: b.label }, rows: open.filter((a) => bucketById.get(a.id) === b.id) }))
+    .filter((g) => g.rows.length)
+  const ordered = groups.flatMap((g) => g.rows)
+  const numbers = new Map(ordered.map((a, i) => [a.id, i + 1]))
+  const shown = ordered.filter((a) => isOpen(bucketById.get(a.id)!))
+  const days = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const a of tasks) {
+      for (const t of [a.start, a.doneAt, a.cancelledAt]) {
+        if (!t) continue
+        const k = dayOf(t)
+        if (!m.has(k)) m.set(k, new Set())
+        m.get(k)!.add(a.id)
+      }
+    }
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14)
+  }, [tasks])
+  const record = tab === 'live' ? [] : tasks.filter((a) => days.find(([k]) => k === tab)?.[1].has(a.id)).sort((a, b) => a.start.localeCompare(b.start))
+  const reqOf = (a: AfterSaleTask) => a.req.join('；') || (a.shots.length ? '见截图' : '')
+  const cols: Col<AfterSaleTask>[] = [
+    // 默认宽度按 1440 屏右栏（约 460px）排满；倒计时放不下就折成两行，不撑宽表格
+    { id: 'no', header: '#', size: 36, minSize: 32, hideable: false, cell: (a) => <RowNo n={numbers.get(a.id) ?? 0} /> },
+    // 时间用短写法（13h、逾 3h、确认 58:17），一行放得下，左右两表行高一致
+    { id: 'time', header: '剩余', size: 84, minSize: 76, cell: (a) => <span className="whitespace-nowrap" title={afterSaleState(a, now).label}><TaskCountdown a={a} now={now} tiny /></span> },
+    { id: 'order', header: '订单', size: 130, minSize: 110, hideable: false, grow: true, cell: (a) => (
+      <div className="flex min-w-0 items-center gap-1">
+        <OrderBadges v={order(a.orderId) ?? {}} />
+        <button type="button" data-open onClick={(e) => { e.stopPropagation(); pick(`a:${a.id}`); afterSale(a.id) }} title={a.title} className={cn(cellTitle, titleTone(bucketById.get(a.id) ?? 'later'))}>{a.title}</button>
+        <CopyOrderName title={a.title} />
+      </div>
+    ) },
+    { id: 'req', header: '要求', size: 80, minSize: 70, grow: true, cell: (a) => <span className="line-clamp-2 break-all text-xs leading-4 text-muted-foreground" title={reqOf(a) || undefined}>{a.round > 1 && <span className="mr-1.5 text-foreground/70">第 {a.round} 轮</span>}{reqOf(a) || '—'}</span> },
+    ...(showWriter ? [{ id: 'writer', header: '写手', size: 56, minSize: 44, cell: (a: AfterSaleTask) => <span title={user(a.writerId)?.name} className="flex justify-center"><Avatar user={user(a.writerId)} size={20} /></span> }] : []),
+    { id: 'actions', header: '操作', size: 72, minSize: 64, hideable: false, cell: (a) => waitingMine(a)
+      ? <span className="text-xs text-warn">先回复时间</span>
+      : <span data-deliver onClick={(e) => e.stopPropagation()}><TaskAction a={a} label="交付" /></span> },
+  ]
+  return (
+    <section className="flex min-w-0 flex-col bg-card max-lg:border-b lg:h-full lg:min-h-0">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4 text-sm font-medium">
+        跟进 <span className="num font-normal text-muted-foreground">{open.length}</span>
+        <span className="ml-auto inline-flex items-center gap-2 text-xs font-normal">
+          {waiting > 0 && <span className="text-warn">待确认 {waiting}</span>}
+          {doneToday.length > 0 && <span className="text-muted-foreground">今天已交 {doneToday.length}</span>}
+          {days.length > 0 && (
+            <Select value={tab} onValueChange={setTab}>
+              <SelectTrigger aria-label="查看进行中或某天的跟进记录" className="-my-1 h-7 w-auto gap-1 border-transparent px-2 text-xs shadow-none hover:border-border"><SelectValue /></SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="live">进行中</SelectItem>
+                {days.map(([k, set]) => <SelectItem key={k} value={k}>{k === todayKey ? '今天' : shortDate(k).replace('月', '.').replace('日', '')} 的记录 · {set.size}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+        </span>
+      </header>
+      {tab === 'live' ? <>
+        {open.length > 0 && <BucketChips groups={groups.map((g) => ({ bucket: g.bucket, count: g.rows.length }))} isOpen={isOpen} toggle={(b) => save({ ...saved, [b]: !isOpen(b) })} />}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <DataTable fill id="tasks-followups" freeze={3} toolbar={() => null} rows={shown} rowId={(a) => a.id} cols={cols}
+            onRowClick={(a) => pick(`a:${a.id}`)}
+            rowAttrs={(a) => ({ 'data-task-row': `a:${a.id}`, 'data-selected': sel === `a:${a.id}` })}
+            rowClassName={(a) => rowTone(sel === `a:${a.id}`, !!order(a.orderId)?.urgency || asLate(a, now))}
+            groupBy={(a) => bucketById.get(a.id) ?? 'later'}
+            groupLabel={(key) => { const g = groups.find((x) => x.bucket.id === key); return g ? <GroupLabel bucket={g.bucket} count={g.rows.length} /> : key }}
+            expandedRow={(a) => waitingMine(a) ? <ConfirmationPanel orderId={a.orderId} a={a} now={now} /> : null}
+            empty={open.length ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">分组都收起了，点上面的分组按钮展开</div> : <Empty icon={<Magnolia size={24} />} title={doneToday.length ? `今天的 ${doneToday.length} 条跟进都交完了` : '没有要改的'} />} />
+        </div>
+      </> : <div className="scroll-thin flex-1 lg:min-h-0 lg:overflow-y-auto">{record.map((a) => <RecordRow key={a.id} a={a} day={tab} />)}</div>}
+    </section>
   )
 }

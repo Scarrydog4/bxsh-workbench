@@ -8,8 +8,8 @@ import { Thumbs } from './ImageViewer'
 import { IMAGE_INPUT_EMPTY_MESSAGE, imageFilesFromTransfer } from './image-input'
 import { imageArrivalClass, useImageReceiveFeedback } from './useImageReceiveFeedback'
 
-export function SettlementNote({ note, shots, onNote, onShots, disabled, onReading, label = '结算备注', placeholder = '备注（可选）', maxImages = 9, maxLength = 2000, anonymous = false }: {
-  note: string; shots: string[]; onNote: (value: string) => void; onShots: (value: string[]) => void; disabled?: boolean; onReading: (value: boolean) => void; label?: string; placeholder?: string; maxImages?: number; maxLength?: number; anonymous?: boolean
+export function SettlementNote({ note, shots, onNote, onShots, disabled, onReading, label = '结算备注', placeholder = '备注（可选）', maxImages = 9, maxLength = 2000, anonymous = false, compact = false }: {
+  note: string; shots: string[]; onNote: (value: string) => void; onShots: (value: string[]) => void; disabled?: boolean; onReading: (value: boolean) => void; label?: string; placeholder?: string; maxImages?: number; maxLength?: number; anonymous?: boolean; compact?: boolean
 }) {
   const reading = useRef(false)
   const pasteTarget = useRef<HTMLTextAreaElement>(null)
@@ -37,7 +37,7 @@ export function SettlementNote({ note, shots, onNote, onShots, disabled, onReadi
     onPaste={e => { e.stopPropagation(); const files = imageFilesFromTransfer(e.clipboardData); if (files.length) { e.preventDefault(); void add(files) } }}
     onDragOver={e => { if (hasFiles(e)) { e.preventDefault(); setOver(true) } }} onDragLeave={() => setOver(false)}
     onDrop={e => { const files = imageFilesFromTransfer(e.dataTransfer); if (hasFiles(e) || files.length) { e.preventDefault(); e.stopPropagation(); setOver(false); void add(files) } }}>
-    <textarea ref={pasteTarget} aria-label={label} rows={3} maxLength={maxLength} disabled={disabled} className={cn(inputCls, 'h-auto min-h-20 resize-y border-0 bg-transparent p-1 pr-9 shadow-none focus-visible:ring-0', anonymous && 'text-base sm:text-sm')} placeholder={placeholder} value={note} onChange={e => onNote(e.target.value)} />
+    <textarea ref={pasteTarget} aria-label={label} rows={compact ? 1 : 3} maxLength={maxLength} disabled={disabled} className={cn(inputCls, 'h-auto resize-y border-0 bg-transparent p-1 pr-9 shadow-none focus-visible:ring-0', compact ? 'min-h-6' : 'min-h-20', anonymous && 'text-base sm:text-sm')} placeholder={placeholder} value={note} onChange={e => onNote(e.target.value)} />
     <button type="button" aria-label={`${label}：上传截图`} title="上传截图" disabled={disabled || reading.current} className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-40" onClick={() => picker.current?.click()}><ImageSquare size={18}/></button>
     <input ref={picker} type="file" accept="image/*" multiple={maxImages > 1} aria-label={`${label}截图文件`} className="hidden" disabled={disabled || reading.current} onChange={e => { const files = imageFilesFromTransfer({ files: e.target.files! } as DataTransfer); e.target.value = ''; if (files.length) void add(files) }}/>
 

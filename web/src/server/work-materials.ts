@@ -7,9 +7,10 @@ import { pipeline } from 'node:stream/promises'
 import { newFilePath, safeName } from './files'
 import { uid } from './ids'
 import { storeCaseOriginal, serveCaseImage, galleryArchive } from './case-originals'
-import { and, desc, eq, isNull, count, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, count, sql } from 'drizzle-orm'
 import { z } from 'zod'
-import { canMaintainMaterials, UNCATEGORIZED, type ReviewMessage } from '@/shared/work-materials'
+import { canMaintainMaterials, payable, UNCATEGORIZED, type ReviewMessage } from '@/shared/work-materials'
+import { notify } from './notify'
 import { can } from '@/shared/perm'
 import { log, WRITE_LOCK } from './actions'
 import { db } from './db'
@@ -32,8 +33,10 @@ export const materialInput = z.object({
   removeFile: z.boolean().optional(),
 })
 export const reviewInput = z.object({
-  id: z.uuid(), orderId: word(80), writerId: word(80), title: word(120), issue: z.string().trim().max(8000).default(''),
+  id: z.uuid(), orderId: z.string().trim().max(80).nullable().optional(), writerId: word(80), title: z.string().trim().max(120).optional(), issue: z.string().trim().max(8000).default(''),
   image: imageData.optional(), images: z.array(imageData).max(5).optional(),
+  kind: z.enum(['penalty', 'reward']).default('penalty'), category: z.string().trim().max(20).default(''),
+  amount: z.number().positive().max(100_000).transform(n => Math.round(n * 100) / 100).nullable().optional(),
 }).refine(data => (data.image ? 1 : 0) + (data.images?.length ?? 0) <= 5 &&
   (!!data.issue || !!data.image || !!data.images?.length), '请填写复盘内容或添加截图，最多 5 张')
 export function requireLibrary(c: Ctx) { if (!can(c.role, 'order.view')) throw deny() }
@@ -145,46 +148,70 @@ export async function reviewCount(c: Ctx) {
 export async function listReviews(c: Ctx) {
   const owners = alias(users, 'review_owner')
   const rows = await db.select({ r: qualityReviews, orderNo: orders.no, orderTitle: orders.title, writerName: users.name, ownerId: orders.ownerId, ownerName: owners.name })
-    .from(qualityReviews).innerJoin(orders, eq(qualityReviews.orderId, orders.id)).innerJoin(users, eq(qualityReviews.writerId, users.id)).leftJoin(owners, eq(orders.ownerId, owners.id))
+    .from(qualityReviews).leftJoin(orders, eq(qualityReviews.orderId, orders.id)).innerJoin(users, eq(qualityReviews.writerId, users.id)).leftJoin(owners, eq(orders.ownerId, owners.id))
     .where(reviewScope(c)).orderBy(desc(qualityReviews.createdAt))
-  return rows.map(({ r: { imageHash, extraImageHashes, ...r }, ...info }) => ({ ...r, ...info,
+  return rows.map(({ r: { imageHash, extraImageHashes, revokedBy: _revokedBy, settledBy: _settledBy, creatorId: _creatorId, ...r }, ...info }) => ({ ...r, ...info,
     image: imageHash ? `/api/reviews/${r.id}/image` : null,
     images: [imageHash, ...extraImageHashes].filter((hash): hash is string => !!hash).map(hash => `/api/reviews/${r.id}/image?v=${hash}`),
   }))
 }
 export async function createReview(c: Ctx, input: z.infer<typeof reviewInput>) {
   if (!c.role.locked) throw deny()
-  const { image, images, ...entry } = input
+  const { image, images, orderId = null, amount = null, ...entry } = input
   const [imageHash = null, ...extraImageHashes] = await Promise.all([...(image ? [image] : []), ...(images ?? [])].map(saveWorkImage))
   await db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(${WRITE_LOCK})`)
-    const [writer] = await tx.select({ id: users.id }).from(orderWriters)
-      .innerJoin(orders, eq(orders.id, orderWriters.orderId)).innerJoin(users, eq(users.id, orderWriters.userId))
-      .where(and(eq(orders.id, entry.orderId), isNull(orders.deletedAt), eq(users.id, entry.writerId), eq(users.active, true), eq(users.canWrite, true)))
-    if (!writer) throw bad('请选择这笔订单当前负责的写手')
-    const [saved] = await tx.insert(qualityReviews).values({ ...entry, imageHash, extraImageHashes, creatorId: c.me.id }).onConflictDoNothing().returning()
-    if (!saved) throw new HttpError(409, '这条复盘已发起，请刷新列表')
-    await log(tx, c, { action: '发起复盘', objectType: 'qualityReview', objectId: entry.id })
+    let title = entry.title || entry.category || (entry.kind === 'reward' ? '奖励' : '惩罚')
+    if (orderId) {
+      const [writer] = await tx.select({ id: users.id, orderTitle: orders.title }).from(orderWriters)
+        .innerJoin(orders, eq(orders.id, orderWriters.orderId)).innerJoin(users, eq(users.id, orderWriters.userId))
+        .where(and(eq(orders.id, orderId), isNull(orders.deletedAt), eq(users.id, entry.writerId), eq(users.active, true), eq(users.canWrite, true)))
+      if (!writer) throw bad('请选择这笔订单当前负责的写手')
+      title = entry.title || writer.orderTitle
+    } else {
+      const [writer] = await tx.select({ id: users.id }).from(users).where(and(eq(users.id, entry.writerId), eq(users.active, true), eq(users.canWrite, true)))
+      if (!writer) throw bad('请选择在用的写手')
+    }
+    // 奖励不用写手回复，记下就算完成
+    const reward = entry.kind === 'reward'
+    const now = new Date().toISOString()
+    const [saved] = await tx.insert(qualityReviews).values({ ...entry, title, orderId, amount, imageHash, extraImageHashes, creatorId: c.me.id, ...(reward ? { status: 'done' as const, confirmedAt: now } : {}) }).onConflictDoNothing().returning()
+    if (!saved) throw new HttpError(409, '这条奖惩已发起，请刷新列表')
+    const what = `${reward ? '奖励' : '惩罚'}${amount ? ` ¥${amount}` : ''}${entry.category ? ` · ${entry.category}` : ''}`
+    await log(tx, c, { action: reward ? '记奖励' : '发起复盘', objectType: 'qualityReview', objectId: entry.id, to: what })
+    await notify(tx, [entry.writerId], { kind: '奖惩', tab: 'page:reviews', title: what, body: entry.issue || title, actorId: c.me.id })
   })
   broadcast('changed', [])
 }
-type ReviewAction = {action:'reply';reply:string;images?:string[]} | {action:'supplement';note:string;images?:string[]} | {action:'confirm'}
+type ReviewAction = {action:'reply';reply:string;images?:string[]} | {action:'supplement';note:string;images?:string[]} | {action:'confirm';revoke?:boolean;note?:string} | {action:'revoke';note:string}
 export async function transitionReview(c: Ctx, id: string, input: ReviewAction, version?: number) {
   requireReview(c)
   const writer = input.action === 'reply'
   if (!writer && !c.role.locked) throw deny()
-  const pictures = input.action === 'confirm' ? [] : await Promise.all((input.images ?? []).map(saveWorkImage))
+  const pictures = input.action === 'confirm' || input.action === 'revoke' ? [] : await Promise.all((input.images ?? []).map(saveWorkImage))
   await db.transaction(async tx => {
     const where = and(eq(qualityReviews.id,id), writer ? eq(qualityReviews.writerId,c.me.id) : undefined)
     const [row] = await tx.select().from(qualityReviews).where(where).for('update')
     if (!row) throw notFound()
+    const now = new Date().toISOString()
+    // 记错了：随时撤销（结清后不行），记录还在，金额不再算
+    if (input.action === 'revoke') {
+      if (row.revokedAt) throw new HttpError(409,'已经撤销过了')
+      if (row.settledAt) throw new HttpError(409,'已经随工资结清，不能撤销')
+      await tx.update(qualityReviews).set({revokedAt:now,revokedBy:c.me.id,revokeReason:input.note,status:'done',confirmedAt:row.confirmedAt ?? now}).where(where)
+      await log(tx,c,{action:'撤销奖惩',objectType:'qualityReview',objectId:id,note:input.note})
+      await notify(tx,[row.writerId],{kind:'奖惩',tab:'page:reviews',title:`${row.kind === 'reward' ? '奖励' : '罚款'}已撤销`,body:input.note,actorId:c.me.id})
+      return
+    }
     if (row.status !== (writer ? 'pending' : 'waiting') ||
         (version !== undefined ? version !== row.history.length : row.history.some(m => m.type === 'supplement'))) {
       throw new HttpError(409,'复盘已更新，请查看最新回复后再操作')
     }
-    const now = new Date().toISOString()
     if (input.action === 'confirm') {
-      await tx.update(qualityReviews).set({status:'done',confirmedAt:now}).where(where)
+      // 看完写手回复：维持罚款，或者顺手撤销
+      const revoke = !!input.revoke && !!row.amount && !row.settledAt
+      await tx.update(qualityReviews).set({status:'done',confirmedAt:now,...(revoke ? {revokedAt:now,revokedBy:c.me.id,revokeReason:input.note || '看了写手回复，撤销罚款'} : {})}).where(where)
+      if (revoke) await notify(tx,[row.writerId],{kind:'奖惩',tab:'page:reviews',title:'罚款已撤销',body:input.note || row.title,actorId:c.me.id})
     } else {
       const text = input.action === 'reply' ? input.reply : input.note
       const message: ReviewMessage = {type:input.action,text,...(pictures.length ? {images:pictures} : {}),actorId:c.me.id,actorName:c.me.name,at:now}
@@ -220,4 +247,23 @@ export async function workImage(req: Request, c: Ctx, id: string, review: boolea
   }
   const name = requested + '.webp'
   return fileResponse(req, { path: path.join(env.storageDir, 'private-images', name), name, mime: 'image/webp', id: name, inline: true, cacheControl: 'private, no-store' })
+}
+
+export const settleReviewsInput = z.object({ writerId: z.string().min(1).max(80), ids: z.array(z.string().min(1).max(80)).min(1).max(500) })
+
+/** 发工资时把这个写手能结的奖惩一起结掉：奖励加、罚款扣；结完锁住不能撤销 */
+export async function settleReviews(c: Ctx, input: z.infer<typeof settleReviewsInput>) {
+  if (!c.role.locked) throw deny()
+  const net = await db.transaction(async tx => {
+    const rows = await tx.select().from(qualityReviews).where(and(eq(qualityReviews.writerId, input.writerId), inArray(qualityReviews.id, input.ids))).for('update')
+    if (rows.length !== new Set(input.ids).size || rows.some(r => !payable(r))) throw new HttpError(409, '奖惩有变化，请刷新后再结')
+    const now = new Date().toISOString()
+    await tx.update(qualityReviews).set({ settledAt: now, settledBy: c.me.id }).where(inArray(qualityReviews.id, input.ids))
+    const total = rows.reduce((sum, r) => sum + Math.round((r.amount ?? 0) * 100) * (r.kind === 'reward' ? 1 : -1), 0) / 100
+    const [writer] = await tx.select({ name: users.name }).from(users).where(eq(users.id, input.writerId))
+    await log(tx, c, { action: '结清奖惩', objectType: 'qualityReview', objectLabel: writer?.name, to: `${rows.length} 条，合计 ${total >= 0 ? '+' : '−'}¥${Math.abs(total)}` })
+    return total
+  })
+  broadcast('changed', [])
+  return net
 }

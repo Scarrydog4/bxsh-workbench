@@ -1,0 +1,1 @@
+{"name":"bxsh-workbench-agent","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.mjs"},"dependencies":{"@modelcontextprotocol/server":"2.4.0","zod":"4.6.7"}}

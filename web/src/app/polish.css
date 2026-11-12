@@ -1,0 +1,92 @@
+/* Motion Prompt #049 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#049 */
+/* Product colors and responsive placement are retained; a surface never shifts the underlying page. */
+:root {
+  --motion-out: cubic-bezier(.33,1,.68,1);
+  --motion-in-out: cubic-bezier(.65,0,.35,1);
+  --surface-shadow: 0 2px 4px hsl(var(--foreground) / .025), 0 12px 36px -20px hsl(var(--foreground) / .12);
+}
+[data-workspace-overlay], .sheet-overlay {
+  background: rgb(18 20 28 / .42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+[data-workspace-overlay][data-state="open"] { animation: surface-fade-in 320ms var(--motion-out) both; }
+[data-workspace-overlay][data-state="closed"] { animation: surface-fade-out 280ms var(--motion-in-out) both; }
+[data-workspace-dialog] {
+  border-color: hsl(var(--border) / .8);
+  background-color: hsl(var(--card));
+  box-shadow: 0 24px 72px -16px rgb(0 0 0 / .24), 0 0 0 1px rgb(255 255 255 / .08);
+}
+[data-workspace-dialog][data-state="open"] { animation: polish-dialog-enter 320ms var(--motion-out) both; }
+[data-workspace-dialog][data-state="closed"] { animation: polish-dialog-exit 280ms var(--motion-in-out) both; }
+@keyframes polish-dialog-enter { from { opacity: 0; scale: .9; } to { opacity: 1; scale: 1; } }
+@keyframes polish-dialog-exit { from { opacity: 1; scale: 1; } to { opacity: 0; scale: .9; } }
+/* Motion Prompt #050 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#050 */
+.sheet-motion[data-state="open"] { animation-duration: 380ms; animation-timing-function: var(--motion-out); }
+.sheet-motion[data-state="closed"] { animation-duration: 350ms; animation-timing-function: var(--motion-in-out); }
+.sheet-motion { box-shadow: -12px 0 48px -16px rgb(0 0 0 / .18); }
+/* Motion Prompt #057 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#057 */
+.choice-rail-marker { z-index: 0; border-radius: 8px; background: hsl(var(--primary) / .085); box-shadow: inset 0 0 0 1px hsl(var(--primary) / .1); transition: transform 250ms var(--motion-in-out), width 250ms var(--motion-in-out), height 250ms var(--motion-in-out); }
+.choice-rail > button { position: relative; z-index: 1; transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out; }
+.choice-rail > button:is([aria-current="true"], [aria-selected="true"], [aria-pressed="true"]) { background: transparent; border-color: transparent; }
+.tabs-indicator { transition-duration: 250ms; transition-timing-function: var(--motion-in-out); }
+.polish-content-enter { animation: polish-content-enter 200ms ease-out both; }
+@keyframes polish-content-enter { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+/* Motion Prompt #060 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#060 */
+.sliding-segments-indicator { transition: transform 250ms var(--motion-in-out); }
+/* Motion Prompt #052 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#052 */
+.disclosure-content { transition: grid-template-rows 350ms var(--motion-in-out), opacity 200ms ease-out, visibility 0s 350ms; }
+.disclosure[data-open="true"] > .disclosure-content { transition-delay: 0s; }
+.nav-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 350ms var(--motion-in-out), opacity 180ms ease-out, visibility 0s 350ms; }
+.nav-disclosure[data-open="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
+/* Stable, restrained surfaces across operational pages. Tables never animate row positions. */
+.workspace-shell { background: hsl(var(--background)); }
+.workspace-shell > aside { background-image: linear-gradient(165deg, hsl(var(--card) / .65), transparent 50%); }
+.workspace-shell main > div > :is(section, .bg-card, .border),
+.workspace-shell main > div > div > :is(section.bg-card, .rounded-xl.bg-card) { box-shadow: var(--surface-shadow); }
+.workspace-shell h1 { letter-spacing: -.025em; }
+.workspace-shell :is(input:not([type="checkbox"]):not([type="radio"]), textarea) { transition: border-color 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out; }
+.workspace-shell :is(input:not([type="checkbox"]):not([type="radio"]), textarea):focus { box-shadow: 0 0 0 3px hsl(var(--primary) / .1); }
+.workspace-shell button { -webkit-tap-highlight-color: transparent; }
+.workspace-shell button:disabled { cursor: default; }
+.workspace-shell :is(table, [role="table"]) thead { background: hsl(var(--muted) / .48); }
+.workspace-shell [data-nav][aria-current="page"] { color: hsl(var(--primary)); font-weight: 600; }
+.workspace-shell [data-nav] > span.absolute { background: hsl(var(--card)); border-color: hsl(var(--primary) / .13); box-shadow: 0 2px 5px hsl(var(--primary) / .05); }
+.workspace-shell [data-workspace-page="settings"] > div { max-width: 1440px; }
+.workspace-shell [data-workspace-page="settings"] section { overflow: hidden; }
+.workspace-shell [data-workspace-page="settings"] section > div:first-child { background: hsl(var(--muted) / .3); }
+.workspace-shell [data-workspace-page="reviews"] article { box-shadow: var(--surface-shadow); }
+.workspace-shell [data-workspace-page="toolbox"] > div > div { max-width: 1080px; }
+.workspace-shell [data-workspace-page="assistant"] textarea { line-height: 1.8; }
+[cmdk-item] { transition: background-color 120ms ease-out, color 120ms ease-out; }
+[cmdk-item][data-selected="true"] { background: hsl(var(--primary) / .09); color: hsl(var(--primary)); }
+[data-sonner-toast] { border-radius: 12px !important; box-shadow: 0 8px 28px -8px rgb(0 0 0 / .2) !important; }
+[role="switch"] { transition: background-color 180ms ease-out, box-shadow 180ms ease-out; }
+[role="switch"][data-state="checked"] { box-shadow: 0 0 0 3px hsl(var(--primary) / .07); }
+.preview-bar { color: hsl(var(--primary)); }
+/* Motion Prompt #081 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#081 */
+.case-card { box-shadow: 0 2px 6px rgb(0 0 0 / .04); transition: translate 300ms var(--motion-out), box-shadow 300ms var(--motion-out), border-color 150ms; }
+/* Motion Prompt #082 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#082 */
+.case-cover img { transition: transform 500ms var(--motion-out); }
+@media (hover: hover) and (pointer: fine) {
+  .case-card:hover { translate: 0 -10px; box-shadow: 0 12px 22px rgb(0 0 0 / .12); }
+  .case-cover:hover img { transform: scale(1.15); }
+}
+.case-card:focus-within { border-color: hsl(var(--primary) / .45); }
+/* Motion Prompt #162 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#162 */
+.case-preview-image { animation: polish-image-enter 450ms var(--motion-out) both; }
+@keyframes polish-image-enter { from { opacity: 0; scale: .97; } to { opacity: 1; scale: 1; } }
+.image-placeholder { background: linear-gradient(110deg, hsl(var(--muted)) 30%, hsl(var(--card)) 50%, hsl(var(--muted)) 70%); background-size: 250% 100%; animation: image-placeholder 1.4s linear infinite; }
+@keyframes image-placeholder { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@media (max-width: 639px) {
+  [data-workspace-dialog][data-app-dialog-size]:not([data-app-dialog-size="lg"])[data-state="open"] { animation: polish-sheet-up 320ms var(--motion-out) both; }
+  @keyframes polish-sheet-up { from { opacity: 0; translate: 0 32px; } to { opacity: 1; translate: 0 0; } }
+  .preview-bar { font-size: 10px; }
+  .preview-bar b { white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-workspace-dialog], [data-workspace-overlay], .sheet-motion, .case-preview-image, .polish-content-enter, .image-placeholder { animation: none !important; }
+  .choice-rail-marker, .nav-disclosure, .disclosure-content, .case-card, .case-cover img, .tabs-indicator, .sliding-segments-indicator { transition: none !important; }
+  .case-card:hover { translate: none; }
+  .case-cover:hover img { transform: none; }
+}

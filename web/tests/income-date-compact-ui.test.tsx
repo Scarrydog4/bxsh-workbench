@@ -19,7 +19,7 @@ it('紧凑模式外面只有日期按钮，全部/快捷和前后切换都在弹
   const props = { value: incomePreset('month'), all: true, onAll: vi.fn(), onChange: vi.fn() }
   let tree = IncomeDateFilter({ ...props, compact: true, label: '下单日期' })
   const outside = nodes(tree, true)
-  expect(outside.filter(n => n.type === 'button').map(text)).toEqual(['下单日期 · 全部'])
+  expect(outside.filter(n => n.type === 'button').map(text)).toEqual(['日期'])
   expect(outside.some(n => n.type === 'segmented')).toBe(false)
   const popup = nodes(tree).find(n => n.type === 'popover-content')
   for (const label of ['全部日期', '今日', '本周', '本月']) expect(nodes(popup).some(n => n.type === 'button' && text(n) === label)).toBe(true)
@@ -44,5 +44,5 @@ it('紧凑模式快捷切换和全部日期即时回写，范围平移仍复用�
   expect(value).toMatchObject({ from: '2026-10-26', to: '2026-10-26' })
   nodes(render()).find(n => n.type === 'button' && text(n) === '全部日期').props.onClick()
   expect(onAll).toHaveBeenCalledOnce()
-  expect(nodes(render(), true).filter(n => n.type === 'button').map(text)).toEqual(['结算日期 · 全部'])
+  expect(nodes(render(), true).filter(n => n.type === 'button').map(text)).toEqual(['日期'])
 })

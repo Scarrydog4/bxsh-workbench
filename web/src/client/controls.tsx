@@ -39,7 +39,8 @@ export function Segmented<T extends string>({ value, onChange, items, label, siz
             className={cn('relative inline-flex shrink-0 items-center whitespace-nowrap rounded-md transition-colors', size === 'sm' ? 'h-7 gap-1 px-2.5 text-xs' : 'h-8 gap-1.5 px-3 text-sm',
               on ? 'font-medium text-primary' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground')}
           >
-            {on && (reducedMotion ? <span className="absolute inset-0 rounded-md bg-primary/10" /> : <motion.span layoutId={layout} initial={false} className="absolute inset-0 rounded-md bg-primary/10" transition={{ duration: .18, ease: [.2, .8, .2, 1] }} />)}
+            {/* Motion Prompt #060 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#060 */}
+            {on && (reducedMotion ? <span className="absolute inset-0 rounded-md bg-primary/10" /> : <motion.span layoutId={layout} initial={false} className="absolute inset-0 rounded-md bg-primary/10" transition={{ duration: .25, ease: [.65, 0, .35, 1] }} />)}
             <span className="relative inline-flex items-center gap-1.5">{text}</span>
           </button>
         )

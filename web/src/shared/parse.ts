@@ -3,6 +3,7 @@ import { addDays, iso, today } from './format'
 
 /** 录单时可预先填好的字段（粘贴识别、照某单再录一单都用它）。 */
 export interface Prefill {
+  inquiryId?: string
   title?: string
   salesMode?: SalesMode
   ownerId?: string

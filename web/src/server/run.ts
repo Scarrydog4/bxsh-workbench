@@ -87,6 +87,7 @@ export async function notifyAfter(tx: Tx, c: Ctx, w: World, name: string, input:
       return
     }
     case 'order.create': {
+      if(result.existing) return
       const id = result.id as string
       const [o] = await tx.select().from(t.orders).where(eq(t.orders.id, id))
       const writers = await tx.select().from(t.orderWriters).where(eq(t.orderWriters.orderId, id))

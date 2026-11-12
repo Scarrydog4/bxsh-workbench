@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { FORUM_COPY } from '@/shared/copy/forum'
 import { FORUM_CATEGORIES, type ForumCategory, type ForumPostDetail, type ForumPostSummary, type ForumSort } from '@/shared/forum'
 import { Segmented } from '../controls'
+import { ChoiceRail } from '@/components/ui/choice-rail'
 import { usePref } from '../prefs'
 import { useSession } from '../store'
 import { Avatar } from '../ui'
@@ -120,7 +121,7 @@ function ForumPanel() {
           <Button size="sm" variant="outline" className="h-7" onClick={() => setBannerSeen(true)}>{FORUM_COPY.common.gotIt}</Button>
         </div>
       )}
-      <nav aria-label="分类" className="scroll-hidden flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-1.5">
+      <ChoiceRail role="navigation" aria-label="分类" className="scroll-hidden flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-1.5">
         {(['all', ...FORUM_CATEGORIES] as Cat[]).map(c => {
           const active = category === c
           return (
@@ -134,7 +135,7 @@ function ForumPanel() {
             </button>
           )
         })}
-      </nav>
+      </ChoiceRail>
       {category !== 'all' && <p className="shrink-0 border-b px-4 py-1.5 text-xs text-muted-foreground">{FORUM_COPY.categoryDesc[category]}</p>}
       {error && <div role="alert" className="flex shrink-0 items-center gap-2 border-b px-4 py-2 text-sm text-danger">{error}<Button size="sm" variant="ghost" onClick={refreshAll}>{FORUM_COPY.common.retry}</Button></div>}
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">

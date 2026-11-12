@@ -21,7 +21,7 @@ import { deadlineFrom, iso, money, today } from '@/shared/format'
 import { paymentSnapshot } from '@/shared/reconciliation'
 import { CONFIRM_WINDOW, DEFAULT_DELIVERY } from '@/shared/as-rules'
 import { allocationPolicyForDate, fixedAllocation, isFixedAllocation } from '@/shared/allocation'
-import { allocationBase, cents, sumMoney } from '@/shared/calc'
+import { allocationBase, cents, PROXY_RATE, sumMoney } from '@/shared/calc'
 import { writerPayAtRate } from '@/shared/writer-rates'
 import { dueItems } from '@/shared/settle'
 import type { Order, PermKey } from '@/shared/types'
@@ -281,6 +281,7 @@ export const ACTIONS = {
     schema: z.object({
       title: z.string().trim().min(1, '订单名称必填').max(200),
       suggestedNumber: z.string().trim().max(30).optional(),
+      inquiryId: z.uuid().optional(),
       orderDate: isoDate,
       dueDate: isoDate.nullable(),
       ownerId: z.string(),
@@ -294,18 +295,39 @@ export const ACTIONS = {
       via: z.string().max(20).optional(),
       urgent: z.boolean().default(false),
       urgencyNote: z.string().trim().max(500).default(''),
+      /** 替暂停的销售代录：ownerId 填那个销售，代录人是自己 */
+      proxy: z.boolean().optional(),
     }),
     run: async (tx, c, w, i) => {
       need(c, 'order.create')
+      if (i.inquiryId) {
+        const [lead] = await tx.select().from(t.inquiries).where(eq(t.inquiries.id,i.inquiryId))
+        if (!lead || !c.role.locked && lead.ownerId !== c.me.id) throw notFound()
+        if (lead.orderId) {
+          const [existing] = await tx.select().from(t.orders).where(eq(t.orders.id,lead.orderId))
+          if(!existing || existing.deletedAt) throw bad('已关联订单不在正常列表，请先核对回收站')
+          if(!rowVisible({...existing,assignees:[]},c.me,c.role)) throw notFound()
+          return {id:existing.id,no:existing.no,title:existing.title,existing:true}
+        }
+        if (lead.status !== 'active') throw bad('请先恢复这条意向单')
+      }
       const admin = can(c.role, 'order.assign')
-      const ownerId = admin ? i.ownerId : c.me.id
+      let ownerId = admin ? i.ownerId : c.me.id
+      let proxyId: string | null = null
+      if (i.proxy && !c.role.locked) {
+        const target = w.users.find(u => u.id === i.ownerId)
+        if (!target || target.id === c.me.id || !target.pausedAt || !isSalesUser(w, target.id) || isAdminUser(w, target.id)) throw bad('只能替暂停中的销售代录')
+        ownerId = target.id
+        proxyId = c.me.id
+      }
       if (!isSalesUser(w, ownerId)) throw bad('归属销售只能是管理员或销售')
       const owner = w.users.find((u) => u.id === ownerId)!
       const salesMode = i.salesMode ?? owner.salesMode ?? 'commission'
       const allocationPolicy = allocationPolicyForDate(iso(today()))
       if (!c.role.locked && allocationPolicy === 'fixed_60_20_20_v1' && salesMode !== (owner.salesMode ?? 'commission')) throw deny('新制度结算方式由管理员调整')
       const ch = i.channelId ? w.channels.find((x) => x.id === i.channelId && !x.deletedAt) : undefined
-      if (i.channelId && (!ch || !channelAccessible(ch, c.me, c.role))) throw notFound()
+      // 代录时用归属销售自己的渠道
+      if (i.channelId && (!ch || !(proxyId ? ch.ownerId === ownerId : channelAccessible(ch, c.me, c.role)))) throw notFound()
       if (!ch && salesMode !== 'cost') throw bad('提成分成订单必须选择渠道')
       // 员工可选写手，比例和工资由服务端带入；只有老板能明确覆盖。
       const pick = admin || can(c.role, 'order.edit')
@@ -346,11 +368,14 @@ export const ACTIONS = {
         urgency: i.urgent ? { note: i.urgencyNote, at: new Date().toISOString(), by: c.me.id } : null,
         note: i.note,
         commissionRate: allocationPolicy === 'fixed_60_20_20_v1' ? .2 : owner.commissionRate,
+        proxyId,
+        proxyRate: PROXY_RATE,
         writerPayPlan: 'completed_balance_50_50',
       })
       if (writers.length) await tx.insert(t.orderWriters).values(writers.map((x, k) => ({ orderId: id, userId: x.userId, pay: x.pay, rate: x.rate, sort: k })))
+      if(i.inquiryId) await tx.update(t.inquiries).set({status:'converted',orderId:id,updatedAt:new Date().toISOString()}).where(eq(t.inquiries.id,i.inquiryId))
       await addOption(tx, w, 'types', i.type)
-      await log(tx, c, { action: i.via ?? '新建', objectType: 'order', objectId: id, objectLabel: no, to: title })
+      await log(tx, c, { action: i.via ?? '新建', objectType: 'order', objectId: id, objectLabel: no, to: title, ...(proxyId ? { note: `替${owner.name}代录，代录费按实收 ${PROXY_RATE * 100}% 从提成里扣` } : {}) })
       return { id, no, title }
     },
   }),
@@ -584,12 +609,14 @@ export const ACTIONS = {
   }),
 
   'order.delete': act({
-    schema: z.object({ ids: z.array(z.string()).min(1).max(500) }),
+    schema: z.object({ ids: z.array(z.string()).min(1).max(500), reason: z.string().trim().max(500, '删除理由不能超过 500 字').default('') }),
     run: async (tx, c, w, i) => {
+      if (!c.role.locked && !i.reason) throw bad('请填写删除理由')
       for (const id of i.ids) {
         const o = orderFor(w, c, id, 'order.delete')
+        if (!c.role.locked && o.ownerId !== c.me.id) throw deny('只能删除归属自己的订单')
         await tx.update(t.orders).set({ deletedAt: new Date().toISOString() }).where(eq(t.orders.id, id))
-        await log(tx, c, { action: '删除', objectType: 'order', objectId: id, objectLabel: o.no, to: '移入回收站' })
+        await log(tx, c, { action: '删除', objectType: 'order', objectId: id, objectLabel: o.no, to: '移入回收站', note: i.reason })
       }
       return { ok: true }
     },
@@ -1058,6 +1085,21 @@ export const ACTIONS = {
       if (u.avatar === avatar) return { ok:true }
       await tx.update(t.users).set({ avatar }).where(eq(t.users.id, u.id))
       await log(tx, c, { action: '修改', objectType: 'user', objectId: u.id, objectLabel: u.name, field: '头像', from: u.avatar ? '旧头像' : '默认', to: '新头像' })
+      return { ok: true }
+    },
+  }),
+
+  /** 销售暂停接单（封号或私事）：头像变灰，其他销售可以替他录单；本人或管理员可以操作 */
+  'user.pause': act({
+    schema: z.object({ id: z.string(), paused: z.boolean() }),
+    run: async (tx, c, w, i) => {
+      if (i.id !== c.me.id) need(c, 'role.manage')
+      const u = w.users.find((x) => x.id === i.id)
+      if (!u) throw notFound()
+      if (!isSalesUser(w, u.id) || isAdminUser(w, u.id)) throw bad('只有销售可以暂停接单')
+      if (!!u.pausedAt === i.paused) return { ok: true }
+      await tx.update(t.users).set({ pausedAt: i.paused ? new Date().toISOString() : null }).where(eq(t.users.id, u.id))
+      await log(tx, c, { action: i.paused ? '暂停接单' : '恢复接单', objectType: 'user', objectId: u.id, objectLabel: u.name })
       return { ok: true }
     },
   }),

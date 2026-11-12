@@ -91,7 +91,7 @@ async function readWorld(db: DB | Tx, opts: { includeDeleted?: boolean } = {}): 
       urgency: o.urgency,
       importance: o.importance,
       progressNote: o.progressNote,
-      extraCosts: (C.get(o.id) ?? []).map(a => ({ id: a.id, name: a.name, contractor: a.contractor, amount: a.amount, date: a.date, note: a.note, proof: a.proof ?? undefined, at: a.at, by: a.by, revoked: revoked(a) })),
+      extraCosts: (C.get(o.id) ?? []).map(a => ({ id: a.id, name: a.name, contractor: a.contractor, contractorId: a.contractorId, amount: a.amount, date: a.date, note: a.note, proof: a.proof ?? undefined, at: a.at, by: a.by, revoked: revoked(a) })),
       ownerId: o.ownerId,
       creatorId: o.creatorId,
       channelId: o.channelId ?? '',
@@ -110,6 +110,8 @@ async function readWorld(db: DB | Tx, opts: { includeDeleted?: boolean } = {}): 
       status: o.status,
       note: o.note,
       commissionRate: o.commissionRate,
+      proxyId: o.proxyId,
+      proxyRate: o.proxyRate,
       salesMode: o.salesMode,
       paymentCheckedAt: o.paymentCheckedAt, paymentCheckedBy: o.paymentCheckedBy, paymentCheckedSnapshot: o.paymentCheckedSnapshot,
       payments: (P.get(o.id) ?? []).map((p) => ({ receiptId: p.receiptId ?? undefined, id: p.id, amount: p.amount, date: p.date, tag: p.tag, note: p.note, by: p.by, proof: p.proof ?? undefined, revoked: revoked(p) })),
@@ -146,7 +148,7 @@ async function readWorld(db: DB | Tx, opts: { includeDeleted?: boolean } = {}): 
   return {
     roles: rRoles.map((r) => ({ id: r.id, name: r.name, locked: r.locked, preset: r.preset, perms: r.perms as Role['perms'], fields: r.fields as unknown as Role['fields'], rowScope: r.rowScope as Role['rowScope'] })),
     // 停用的账号也要留着：历史订单的人名、是否自营（决定提成和利润）都靠它
-    users: rUsers.map((u) => ({ id: u.id, name: u.name, account: u.account, roleId: u.roleId, hue: u.hue, commissionRate: u.commissionRate, writerRate: u.writerRate, salesMode: u.salesMode, avatar: u.avatar ?? undefined, frame: avatarFrame(u.avatarFrame), canWrite: u.canWrite, active: u.active })),
+    users: rUsers.map((u) => ({ id: u.id, name: u.name, account: u.account, roleId: u.roleId, hue: u.hue, commissionRate: u.commissionRate, writerRate: u.writerRate, salesMode: u.salesMode, avatar: u.avatar ?? undefined, frame: avatarFrame(u.avatarFrame), canWrite: u.canWrite, active: u.active, pausedAt: u.pausedAt })),
     channels: rChannels.map((c) => ({ id: c.id, deletedAt: c.deletedAt, name: c.name, ownerId: c.ownerId, note: c.note, active: c.active, avatar: c.avatar ?? undefined })),
     orders,
     channelReceipts: rReceipts.map(row => channelReceiptView(row, rPay, rOrders)),

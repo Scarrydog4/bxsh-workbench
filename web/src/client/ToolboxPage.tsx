@@ -17,6 +17,7 @@ import { MAX_REWRITE_BATCH, MAX_REWRITE_INPUT, MAX_REWRITE_TEXT, REWRITE_LABELS,
 import { cn } from '@/lib/utils'
 import type { PointsView } from '@/shared/points'
 import { PointsDialog } from './PointsDialog'
+import { RewriteLogin } from './RewriteLogin'
 import { wordStats } from './word-stats'
 import { captureRewriteDrop, snapshotRewriteFile, rewriteNetworkMessage, type RewriteFileSource } from './rewrite-file'
 
@@ -48,8 +49,6 @@ export function ToolboxPage({ seed, clearSeed }: { seed: Seed | null; clearSeed:
   const [text, setText] = useState('')
   const [textOrderId, setTextOrderId] = useState('')
   const [whitelist, setWhitelist] = useState('')
-  const [credential, setCredential] = useState('')
-  const [savingCredential, setSavingCredential] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [settings, setSettings] = useState(false)
   const [over, setOver] = useState(false)
@@ -196,16 +195,28 @@ export function ToolboxPage({ seed, clearSeed }: { seed: Seed | null; clearSeed:
     finally { setSubmitting(false); setProgress(''); await loadJobs() }
   }
 
-  async function saveConnection() {
-    setSavingCredential(true)
-    try {
-      const r = await fetch('/api/toolbox/connection', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: credential }) })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.error ?? '保存失败')
-      setCredential(''); toast.success('登录凭据已保存'); await loadCatalog()
-    } catch (e) { toast.error(e instanceof Error ? e.message : '保存失败') }
-    finally { setSavingCredential(false) }
-  }
+  const connected = useCallback(() => {
+    toast.success('微信登录成功，工具连接已恢复')
+    setSettings(false)
+    void loadCatalog()
+  }, [loadCatalog])
+
+  const returningLogin = useRef(false)
+  useEffect(() => {
+    const url = new URL(window.location.href), id = url.searchParams.get('rewriteLogin')
+    if (!id || !/^[a-f0-9]{32}$/.test(id) || returningLogin.current) return
+    returningLogin.current = true
+    url.searchParams.delete('rewriteLogin')
+    window.history.replaceState(window.history.state, '', url.pathname + url.search)
+    void (async () => {
+      try {
+        const response = await fetch('/api/toolbox/connection/wechat', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+        const data = await response.json()
+        if (!response.ok || data.status !== 'connected') throw new Error(data.error ?? '登录未完成，请在服务设置中重新扫码')
+        window.location.replace('/tools')
+      } catch (e) { toast.error(e instanceof Error ? e.message : '登录暂未完成，请重新扫码') }
+    })()
+  }, [])
 
 
   return (
@@ -240,7 +251,7 @@ export function ToolboxPage({ seed, clearSeed }: { seed: Seed | null; clearSeed:
               </div>
             </div>
             {catalogLoading ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><ArrowClockwise size={16} className="animate-spin" />正在加载平台和模式…</p>
-              : (catalog?.error || !platformNames.length) && <div role="alert" className="flex items-start gap-2 text-sm text-danger"><WarningCircle className="mt-0.5 shrink-0" size={16} /><span>{catalog?.error ?? '当前处理方式和语言暂无可用平台，请切换或刷新'} <button type="button" className="underline" onClick={() => void loadCatalog()}>重新加载</button></span></div>}
+              : (catalog?.error || !platformNames.length) && <div role="alert" className="flex items-start gap-2 text-sm text-danger"><WarningCircle className="mt-0.5 shrink-0" size={16} /><span>{catalog?.error ?? '当前处理方式和语言暂无可用平台，请切换或刷新'} {manage && <button type="button" className="mr-2 underline" onClick={() => setSettings(true)}>微信扫码登录</button>}<button type="button" className="underline" onClick={() => void loadCatalog()}>重新加载</button></span></div>}
             {inputKind === 'text' ? <div className="grid gap-2">
               <label htmlFor="rewrite-text" className="sr-only">待处理正文</label>
               <textarea id="rewrite-text" className={cn(inputCls, 'min-h-52 resize-y py-3 leading-6')} value={text} maxLength={MAX_REWRITE_TEXT} disabled={submitting || !!pending} onChange={(e) => setText(e.target.value)} placeholder="粘贴需要降重或降 AI 的正文" />
@@ -305,10 +316,7 @@ export function ToolboxPage({ seed, clearSeed }: { seed: Seed | null; clearSeed:
       </Disclosure>
       <Dialog open={settings} onOpenChange={setSettings}><DialogContent><DialogHeader><DialogTitle>写作牛服务设置</DialogTitle><DialogDescription>管理员统一维护登录，团队成员直接使用。</DialogDescription></DialogHeader>
         <dl className="grid grid-cols-[90px_1fr] gap-y-3 text-sm"><dt className="text-muted-foreground">连接状态</dt><dd>{catalog?.error ?? (catalog?.configured ? '登录有效' : '尚未连接')}</dd><dt className="text-muted-foreground">会员状态</dt><dd>{catalog?.connection?.available ? catalog.connection.levelName : '未开通或已过期'}</dd><dt className="text-muted-foreground">登录有效期</dt><dd>{catalog?.connection?.expiresAt ? new Date(catalog.connection.expiresAt).toLocaleString() : '—'}</dd><dt className="text-muted-foreground">文件大小</dt><dd>输入 10MB 以内，返回稿 40MB 以内</dd></dl>
-        <label htmlFor="ycjg-credential" className="text-sm font-medium">更新微信登录凭据</label>
-        <input id="ycjg-credential" type="password" autoComplete="off" className={inputCls} value={credential} onChange={(e) => setCredential(e.target.value)} placeholder="粘贴微信登录后的链接或 token" />
-        <p className="text-xs leading-5 text-muted-foreground">在写作牛完成微信登录后，粘贴带 token 的登录网址。凭据仅保存在服务器，保存后不会回显。</p>
-        <div className="flex gap-2"><Button disabled={!credential.trim() || savingCredential} onClick={() => void saveConnection()}>{savingCredential ? '正在保存…' : '验证并保存'}</Button><Button variant="outline" onClick={() => void loadCatalog()}>刷新连接</Button></div>
+        {settings && manage && <RewriteLogin onConnected={connected} />}
       </DialogContent></Dialog>
       <PointsDialog open={pointsOpen} onOpenChange={setPointsOpen} wallet={wallet} reload={loadJobs} />
     </div>

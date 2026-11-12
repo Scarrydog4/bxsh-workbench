@@ -3,7 +3,8 @@ const h = vi.hoisted(() => ({ slots: [] as any[], cursor: 0, session: {} as any 
 vi.mock('react', async () => ({ ...await vi.importActual('react'), useEffect: () => {}, useMemo: (fn: () => unknown) => fn(),
   useState: (initial: any) => { const i = h.cursor++; if (!(i in h.slots)) h.slots[i] = typeof initial === 'function' ? initial() : initial; return [h.slots[i], (next: any) => { h.slots[i] = typeof next === 'function' ? next(h.slots[i]) : next }] },
 }))
-vi.mock('@/client/store', () => ({ useSession: () => h.session, salesPeople: (s: any) => s.users, act: vi.fn(), createChannel: vi.fn(), deleteChannel: vi.fn(), setChannelAvatar: vi.fn(), updateChannel: vi.fn() }))
+vi.mock('@/client/store', () => ({ getState: () => ({ prefs: {} }), useSession: () => h.session, salesPeople: (s: any) => s.users, act: vi.fn(), createChannel: vi.fn(), deleteChannel: vi.fn(), setChannelAvatar: vi.fn(), updateChannel: vi.fn() }))
+vi.mock('@/client/prefs', () => ({ usePref: (_key: string, fallback: unknown) => [fallback, vi.fn()] }))
 vi.mock('@/client/nav', () => ({ useNav: () => ({ openOrder: vi.fn() }) }))
 vi.mock('@/client/table-kit', () => ({ DataTable: 'table', TablePageHeader: 'header', TableFooter: 'footer' }))
 vi.mock('@/client/ui', () => ({ AvatarButton: 'avatar-button', ChannelAvatar: 'channel-avatar', StatusPill: 'status', Combobox: 'combo', ImageDrop: 'image-drop', Money: 'money', Person: 'person', Avatar: 'avatar', inputCls: '' }))

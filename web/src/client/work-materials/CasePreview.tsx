@@ -37,6 +37,8 @@ function Thumb({ src, index, active, open }: { src: string; index: number; activ
 export function CasePreview({ entry, index, select, close, actions }: { entry: Material; index: number; select: (index: number) => void; close: () => void; actions: ReactNode }) {
   const images = entry.images, src = images[index], many = images.length > 1
   const [full, setFull] = useState(false)
+  const [loaded, setLoaded] = useState('')
+  const [failed, setFailed] = useState('')
   const main = useImageCopy(src, many ? '第 ' + (index + 1) + ' 张' : '图片')
   const go = (next: number) => { setFull(false); select((next + images.length) % images.length) }
   useEffect(() => { void caseImagePng(src).catch(() => undefined) }, [src])
@@ -54,10 +56,11 @@ export function CasePreview({ entry, index, select, close, actions }: { entry: M
       <AppDialogBody className="flex min-h-0 flex-col gap-3 p-4">
         <div className={'grid min-h-0 flex-1 gap-3 ' + (many ? 'md:grid-cols-[minmax(0,1fr)_132px]' : '')}>
           <div className="relative min-h-[240px] overflow-hidden rounded-lg bg-muted/40">
+            {loaded !== src && <div role="status" className="image-placeholder absolute inset-0 grid place-items-center text-sm text-muted-foreground">{failed === src ? '图片暂时无法加载，请切换图片或稍后重试' : '正在加载图片…'}</div>}
             <div className="absolute inset-0 overflow-auto">
               <button type="button" aria-pressed={full} aria-label={full ? '适应窗口' : '查看原尺寸'} title={full ? '适应窗口' : '查看原尺寸'} onClick={() => setFull(!full)}
                 className={'block focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ' + (full ? 'cursor-zoom-out' : 'size-full cursor-zoom-in')}>
-                <img src={src} alt={entry.title + ' · ' + (index + 1)} className={full ? 'block max-w-none' : 'size-full object-contain'}/>
+                <img key={src} src={src} alt={entry.title + ' · ' + (index + 1)} onLoad={() => setLoaded(src)} onError={() => setFailed(src)} className={(loaded === src ? 'case-preview-image ' : 'opacity-0 ') + (full ? 'block max-w-none' : 'size-full object-contain')}/>
               </button>
             </div>
             <button type="button" aria-busy={main.state === 'copying'} onClick={main.copy} className="absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">

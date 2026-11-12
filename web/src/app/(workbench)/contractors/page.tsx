@@ -1,0 +1,3 @@
+import { WorkspacePage } from '@/client/WorkspacePage'
+import { requireAdminPage } from '@/server/workbench-page-access'
+export default async function Page() { await requireAdminPage('/contractors'); return <WorkspacePage page='contractors' /> }

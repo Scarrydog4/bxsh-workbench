@@ -7,8 +7,8 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
+ENV NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=1280
+RUN pnpm build --webpack
 
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app

@@ -5,11 +5,11 @@ import { usePathname, useRouter } from 'next/navigation'
 import type { Page } from './nav'
 
 export const PAGE_PATHS: Record<Page, string> = {
-  cases: '/cases', talk: '/talk', reviews: '/reviews', home: '/', orders: '/orders', tasks: '/tasks', aftersales: '/follow-ups', channels: '/channels',
+  inquiries: '/inquiries', contractors: '/contractors', cases: '/cases', talk: '/talk', reviews: '/reviews', home: '/', orders: '/orders', tasks: '/tasks', aftersales: '/follow-ups', channels: '/channels',
   income: '/income', settle: '/payroll', toolbox: '/tools', forum: '/forum', dm: '/messages',
   assistant: '/assistant', settings: '/admin/settings', roles: '/admin/accounts', audit: '/admin/audit', trash: '/admin/trash',
 }
-export const ADMIN_PAGES: Page[] = ['settings', 'roles', 'audit', 'trash']
+export const ADMIN_PAGES: Page[] = ['settings', 'roles', 'audit', 'trash', 'contractors']
 export function sidebarPage(page: Page): Page {
   if (page === 'aftersales') return 'tasks'
   return page
@@ -26,7 +26,7 @@ export function forumPostFromPath(path: string) {
   try { return decodeURIComponent(match[1]) } catch { return null }
 }
 
-/** The optimistic target only paints navigation feedback; Next owns URLs, history and route content. */
+/** Next owns URLs and history; authorized client views can follow the target while the route is pending. */
 export function usePageRoute() {
   const pathname = usePathname() || '/'
   const router = useRouter()

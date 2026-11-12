@@ -7,6 +7,7 @@ import { OrderBadges } from './OrderUrgency'
 import { writerInitialDone, writerGroupDone } from '@/shared/writer-stages'
 import { DeliverButton } from './DeliverButton'
 import { VirtualTableBody } from './VirtualTableBody'
+import { VirtualListBody } from './VirtualListBody'
 import { Due } from './Due'
 import { isStale, takeOrdersView } from './orders-shortcut'
 import { SalesModeBadge } from './SalesModeBadge'
@@ -194,6 +195,7 @@ export function OrdersPage() {
   const [dropRow, setDropRow] = useState<string | null>(null)
   const [freeze, setFreeze] = useFreeze(`orders:${me.roleId}`, 4)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const cardScrollRef = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   const [display, setDisplay] = useDevicePref<'auto' | 'overview' | 'table'>(`orders-display:${me.id}`, 'auto')
@@ -397,7 +399,8 @@ export function OrdersPage() {
   }
   const n = Math.max(0, Math.min(freeze, leafs.length - 1, fittingPins))
   const layout = freezeLayout(leafs, n)
-  const selIds = Object.keys(selected).filter((k) => selected[k] && rows.some((r) => r.id === k))
+  const rowIds = useMemo(() => new Set(rows.map(row => row.id)), [rows])
+  const selIds = Object.keys(selected).filter((k) => selected[k] && rowIds.has(k))
   const filterCount = statusF.length + channelF.length + Object.values(specialF).filter(Boolean).length + Number(receipt !== 'all') + Number(!!query)
   const filtersOn = filterCount > 0
   const filterSummary = [
@@ -609,12 +612,12 @@ export function OrdersPage() {
           </ColumnDrag>
 
           {!overview && <div className="flex h-8 shrink-0 items-center justify-between border-t px-4 text-xs tabular-nums text-muted-foreground"><span>{selIds.length ? `已选 ${selIds.length} / ` : ''}{rows.length} 条记录{totals.hasSales && ` · ${selIds.length ? '已选销售额' : '销售额'} ${money(selectedTotals.sales)}`}</span></div>}
-          {overview && <div className="scroll-thin min-h-0 flex-1 overflow-auto overscroll-y-contain p-3 pb-20 sm:pb-3">
+          {overview && <div ref={cardScrollRef} className="scroll-thin min-h-0 flex-1 overflow-auto overscroll-y-contain p-3 pb-20 sm:pb-3">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
               <label className="flex cursor-pointer items-center gap-2"><Checkbox aria-label="全选当前结果" checked={table.getIsAllRowsSelected() ? true : table.getIsSomeRowsSelected() ? 'indeterminate' : false} onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)} />全选当前结果</label>
             </div>
-            <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: availableWidth >= 760 ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' }}>
-              {table.getRowModel().rows.map((r) => {
+            <VirtualListBody rows={table.getRowModel().rows} scrollRef={cardScrollRef} enabled={availableWidth < 760 && rows.length > 100} estimate={210} itemClassName="pb-2 sm:pb-3" className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: availableWidth >= 760 ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' }}>
+              {(r) => {
                 const v = r.original
                 const day = days?.get(r.id)
                 return <Fragment key={v.id}>{day?.first && <h3 className="col-span-full mt-1 flex items-baseline gap-2 px-1 text-xs first:mt-0"><span className="font-semibold text-foreground">{dayLabel(v.orderDate)}</span><span className="tabular-nums text-muted-foreground">{day.count} 单</span></h3>}<article className={cn('order-card relative min-w-0 rounded-xl border bg-card transition-colors hover:border-primary/40', r.getIsSelected() && 'border-primary bg-primary/5', dropRow === v.id && 'ring-2 ring-primary')}
@@ -638,8 +641,8 @@ export function OrdersPage() {
                     {openAfterSale(v) && <div className="mt-2"><AfterSaleChip v={v} /></div>}
                   </button>
                 </article></Fragment>
-              })}
-            </div>
+              }}
+            </VirtualListBody>
           </div>}
 
         </>
@@ -701,6 +704,7 @@ export function OrdersPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      {deletion.dialog}
     </div>
   )
 }

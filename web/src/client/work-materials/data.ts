@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getState } from '../store'
+import { fetchRead, invalidateReport, reportScope } from '../report-cache'
+import { readQueryClient, reportQueryKey } from '../query-client'
 
 export async function request<T>(url: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
@@ -10,20 +14,21 @@ export async function request<T>(url: string, method = 'GET', body?: unknown, si
   return data
 }
 
+export function workDataKey(url: string | null, scope: string, version: number) {
+  const actor = getState()
+  return JSON.stringify(['work', actor?.me && actor?.role ? reportScope(actor) : scope, scope, version, url])
+}
+
 export function useWorkData<T>(url: string | null, scope: string, version = 0) {
-  const [seq, bump] = useState(0)
-  const reload = useCallback(() => bump(n => n + 1), [])
-  const key = scope + ':' + url
-  const [result, setResult] = useState<{ key: string; data?: T; error?: string }>()
-  useEffect(() => {
-    if (!url) return
-    const controller = new AbortController()
-    request<T>(url, 'GET', undefined, controller.signal).then(data => {
-      if (!controller.signal.aborted) setResult({ key, data })
-    }).catch((error: Error) => {
-      if (!controller.signal.aborted) setResult({ key, error: error.message })
-    })
-    return () => controller.abort()
-  }, [key, url, seq, version])
-  return { data: result?.key === key ? result.data : undefined, error: result?.key === key ? result.error : undefined, reload }
+  const key = workDataKey(url, scope, version)
+  const query = useQuery({
+    queryKey: reportQueryKey(key),
+    queryFn: ({ signal }) => fetchRead<T>(url!, signal),
+    enabled: !!url,
+  }, readQueryClient)
+  const reload = useCallback(() => {
+    invalidateReport(key)
+    if (url) void readQueryClient.refetchQueries({ queryKey: reportQueryKey(key), exact: true, type: 'active' })
+  }, [key, url])
+  return { data: url ? query.data : undefined, error: query.error?.message, reload }
 }

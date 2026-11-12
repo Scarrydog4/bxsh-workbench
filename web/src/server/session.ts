@@ -2,7 +2,7 @@ import { avatarFrame } from '@/shared/avatar-frames'
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq, isNull, gt } from 'drizzle-orm'
 import { db } from './db'
-import { roles, sessions, users } from './schema'
+import { agentTokens, roles, sessions, users } from './schema'
 import { env } from './env'
 import type { Role, User } from '@/shared/types'
 
@@ -105,5 +105,6 @@ export async function revokeSession(id: string) {
 }
 
 export async function revokeAllSessions(userId: string) {
+  await db.update(agentTokens).set({ revokedAt: new Date().toISOString() }).where(and(eq(agentTokens.userId,userId),isNull(agentTokens.revokedAt)))
   await db.update(sessions).set({ revokedAt: new Date().toISOString() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
 }

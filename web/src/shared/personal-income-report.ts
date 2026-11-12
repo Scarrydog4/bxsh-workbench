@@ -98,11 +98,11 @@ export function buildPersonalIncomeReport(rows: IncomeRow[], payouts: PersonalPa
     return order
   }
   const bases = new Map<string, IncomeRow>()
-  for (const row of rows) if (row.kind !== '订单收入') bases.set(`${row.id}:${row.kind.includes('提成') ? '销售提成' : '写手工资'}`, row)
+  for (const row of rows) if (row.kind !== '订单收入') bases.set(`${row.id}:${row.kind.includes('提成') || row.kind === '代录费' ? '销售提成' : '写手工资'}`, row)
   const remainingCounted = new Set<string>()
   for (const row of rows) {
-    if (!['工资', '追加工资', '提成'].includes(row.kind) || !selected(row.date) || !allowed(row.id)) continue
-    const kind = row.kind === '提成' ? '销售提成' : '写手工资', order = line(row, kind)
+    if (!['工资', '追加工资', '提成', '代录费'].includes(row.kind) || !selected(row.date) || !allowed(row.id)) continue
+    const kind = row.kind === '提成' || row.kind === '代录费' ? '销售提成' : '写手工资', order = line(row, kind)
     order.included = true; order.earned = order.earned === null || row.amount === null ? null : sumMoney([order.earned, row.amount])
     const label = info.get(row.id)
     const at = kind === '写手工资' && label?.deliveryDate !== undefined ? (label.deliveredAt?.includes('T') ? label.deliveredAt : undefined) : row.kind === '追加工资' ? undefined : label?.createdAt

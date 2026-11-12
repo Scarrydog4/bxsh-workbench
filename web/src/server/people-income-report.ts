@@ -29,7 +29,7 @@ export async function peopleIncomeReport(req: Request, c: Ctx, kind: 'sales' | '
     .map(({ id, name, avatar, hue }) => ({ id, name, avatar, hue }))
   if (payeeId && !sales.some(person => person.id === payeeId)) throw notFound(writer ? '找不到这位写手' : '找不到这位销售')
   const people = payeeId ? sales.filter(person => person.id === payeeId) : sales
-  const rowsByPerson = await Promise.all(people.map(async person => ({ person, rows: (await incomeRows(c, person.id, world)).filter(row => writer ? ['工资', '追加工资', '已发工资'].includes(row.kind) : row.kind === '提成' || row.kind === '已发提成') })))
+  const rowsByPerson = await Promise.all(people.map(async person => ({ person, rows: (await incomeRows(c, person.id, world)).filter(row => writer ? ['工资', '追加工资', '已发工资'].includes(row.kind) : row.kind === '提成' || row.kind === '代录费' || row.kind === '已发提成') })))
   const ids = [...new Set(rowsByPerson.flatMap(({ rows }) => rows.map(row => row.id)))]
   const times = ids.length && selection.from === selection.to && selection.granularity === 'day'
     ? await db.selectDistinct({ id: t.orders.id, at: t.orders.createdAt }).from(t.orders)

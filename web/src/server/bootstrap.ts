@@ -12,7 +12,7 @@ import * as t from './schema'
 import { adminIdsOf, loadWorld, type World } from './repo'
 import { env } from './env'
 import type { Ctx } from './session'
-import { customerStage, ownerCommission, sumMoney } from '@/shared/calc'
+import { customerStage, ownerCommission, proxyFee, sumMoney } from '@/shared/calc'
 import type { IncomeRow } from '@/shared/income'
 export type { IncomeRow } from '@/shared/income'
 import { can, rowVisible } from '@/shared/perm'
@@ -45,6 +45,8 @@ export interface PublicUser {
   commissionRate?: number
   writerRate?: number
   active?: boolean
+  /** 销售暂停接单的时间：头像变灰，其他销售可以替他录单 */
+  pausedAt?: string
 }
 
 export interface ShareLinkView {
@@ -67,6 +69,8 @@ export interface Boot {
   roles: Role[]
   channels: World['channels']
   orderChannels?: ChannelLabel[]
+  /** 暂停中的销售的渠道：其他销售替他代录时选用，不进自己的渠道库 */
+  proxyChannels?: World['channels']
   trashChannels: World['channels']
   orders: OrderView[]
   trash: { id: string; no: string; title: string; channelId: string; ownerId: string; status: string; deletedAt: string }[]
@@ -111,7 +115,8 @@ function income(w: World, viewer: Ctx, targetId: string, adminIds: Set<string>):
     const visible = rowVisible(o, viewer.me, role)
     const base = { id: o.id, no: o.no, title: o.title, status: o.status, ...(role.locked ? { allocationPolicy: o.allocationPolicy } : {}), salesMode: o.salesMode }
     // 转交、删除或退单不撤回已经收到的提成；历史行不恢复订单访问权限。
-    if (seeComm && (visible || self) && (inactive || o.ownerId !== targetId || o.salesMode === 'cost') && !adminIds.has(targetId)) {
+    const activeProxy = !inactive && visible && o.proxyId === targetId && o.ownerId !== targetId && o.salesMode !== 'cost'
+    if (seeComm && (visible || self) && !activeProxy && (inactive || o.ownerId !== targetId || o.salesMode === 'cost') && !adminIds.has(targetId)) {
       const paid = sumMoney(o.settlements.filter(s => s.kind === '销售提成' && s.status === '已确认' && s.payeeId === targetId).map(s => s.amount))
       if (paid) out.push({ ...base, key: `${o.id}:paid-comm`, date: o.orderDate, kind: '已发提成', amount: paid, pay: '已发放' })
     }
@@ -138,6 +143,11 @@ function income(w: World, viewer: Ctx, targetId: string, adminIds: Set<string>):
     if (seeComm && o.salesMode !== 'cost' && o.ownerId === targetId && !adminIds.has(targetId)) {
       const c = calc(o, adminIds)
       out.push({ ...base, key: `${o.id}:comm`, date: o.orderDate, kind: '提成', amount: c.payPending ? null : ownerCommission(o, c.commission), pay: '—' })
+    }
+    // 替暂停的销售代录的单：代录费按实收总金额算，从归属销售提成里扣
+    if (seeComm && activeProxy && !adminIds.has(targetId)) {
+      const c = calc(o, adminIds)
+      out.push({ ...base, key: `${o.id}:proxy`, date: o.orderDate, kind: '代录费', amount: c.payPending ? null : proxyFee(o, c.commission), pay: '—' })
     }
   }
   return out.sort((a, b) => (a.date < b.date ? 1 : -1))
@@ -179,6 +189,7 @@ export async function buildBoot(c: Ctx, lightweight=false, shell=false): Promise
       roleId: u.roleId,
       roleName: r?.name ?? '',
       active: u.active,
+      ...(isSales && u.active && u.pausedAt ? { pausedAt: u.pausedAt } : {}),
       ...(manage || self ? { account: u.account } : {}),
       ...(role.locked ? { commissionRate: u.commissionRate, writerRate: u.writerRate ?? .2 } : {}),
     }
@@ -247,6 +258,7 @@ export async function buildBoot(c: Ctx, lightweight=false, shell=false): Promise
     roles: manage ? w.roles : w.roles.map((r) => ({ ...r, perms: [], fields: { sales: false, writerPay: 'none', commission: 'none', profit: false, channelNo: false } })),
     channels: shell ? [] : w.channels.filter(ch => !ch.deletedAt && channelAccessible(ch, c.me, role)),
     orderChannels: orderChannelLabels(w.channels, [...orders, ...trash]),
+    proxyChannels: shell || role.locked || !can(role, 'order.create') ? [] : w.channels.filter(ch => !ch.deletedAt && ch.ownerId !== c.me.id && !!w.users.find(u => u.id === ch.ownerId && u.active && u.pausedAt)),
     trashChannels: !shell && role.locked && can(role, 'trash.view') && can(role, 'channel.manage') ? w.channels.filter(ch => !!ch.deletedAt && channelAccessible(ch, c.me, role)) : [],
     orders,
     trash,
@@ -346,7 +358,7 @@ function settlementSummary(w: World, c: Ctx): NonNullable<Boot['settlementSummar
 
 function withSettlement(r: IncomeRow, order: World['orders'][number], payee: string, admins: Set<string>, role: Role): IncomeRow {
   if (r.kind === '订单收入') return { ...r, due: r.amount, paid: 0, left: Math.max(0, r.amount ?? 0), over: 0, ...customerStage(order), ...(can(role, 'settle.manage') ? { suggest: 0 } : {}) }
-  const kind = r.kind === '提成' || r.kind === '已发提成' ? '销售提成' : '写手工资'
+  const kind = r.kind === '提成' || r.kind === '已发提成' || r.kind === '代录费' ? '销售提成' : '写手工资'
   const { suggest, ...amounts } = incomeAmounts(order, kind, payee, admins)
   const settlement = { ...settleProgress(order, kind, payee, admins), unpaid: amounts.left }
   return { ...r, ...amounts, ...(can(role, 'settle.manage') ? { suggest } : {}), settle: settleState(order, kind, payee, admins), settlement, available: amounts.left, reserved: 0, pending: 0 }

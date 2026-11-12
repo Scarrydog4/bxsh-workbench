@@ -15,14 +15,14 @@ const sizes: Record<AppDialogSize, string> = {
   lg: 'top-1/2 h-[calc(100dvh-96px)] w-[calc(100vw-24px)] -translate-y-1/2 rounded-xl sm:h-[min(620px,calc(100dvh-80px))] sm:w-[min(860px,calc(100vw-32px))]',
 }
 
-/** Shared task and management frame; only the body scrolls, no movement animation. */
+/** Shared task and management frame; only the body scrolls. */
 export const AppDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { size?: AppDialogSize; overlayClassName?: string }
 >(({ className, overlayClassName, size = 'lg', children, onInteractOutside, style, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay className={cn('bg-black/40 backdrop-blur-[2px] duration-150 motion-reduce:animate-none', overlayClassName)} />
-    <DialogPrimitive.Content ref={ref} data-app-dialog data-app-dialog-size={size}
+    <DialogPrimitive.Content ref={ref} data-workspace-dialog data-app-dialog data-app-dialog-size={size}
       // animate-in/out replace transform. Keep the responsive placement in every
       // animation frame instead of letting the plugin fall back to translate(0, 0).
       style={{

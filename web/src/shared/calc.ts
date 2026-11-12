@@ -35,11 +35,21 @@ export function customerPaidUpAt(o: Pick<Order, 'basePrice' | 'adjustments' | 'p
   return reached
 }
 
-/** 当前归属人的应得提成；已付给前任销售的部分不再重复分配。 */
+export const PROXY_RATE = 0.05
+
+/** 有代录人的单：代录费 = 实收总金额 × 比例，从归属销售的提成里扣，最多扣到提成为 0。退款后实收变少，代录费跟着变少。 */
+export function proxyFee(o: Pick<Order, 'proxyId' | 'proxyRate' | 'ownerId' | 'salesMode' | 'payments'>, commission: number) {
+  if (!o.proxyId || o.proxyId === o.ownerId || o.salesMode === 'cost') return 0
+  const received = sumMoney(o.payments.filter(p => !p.revoked).map(p => p.tag === REFUND_TAG ? -Math.abs(p.amount) : p.amount))
+  const fee = Math.floor(Math.max(0, cents(received)) * (o.proxyRate ?? PROXY_RATE)) / 100
+  return Math.min(fee, Math.max(0, commission))
+}
+
+/** 当前归属人的应得提成：先扣代录费；已付给前任销售的部分不再重复分配。 */
 export function ownerCommission(o: Order, total: number) {
   if (o.salesMode === 'cost') return 0
-  const paidOthers = sumMoney(o.settlements.filter(s => s.kind === '销售提成' && s.status === '已确认' && s.payeeId !== o.ownerId).map(s => s.amount))
-  return Math.max(0, cents(total) - cents(paidOthers)) / 100
+  const paidOthers = sumMoney(o.settlements.filter(s => s.kind === '销售提成' && s.status === '已确认' && s.payeeId !== o.ownerId && s.payeeId !== o.proxyId).map(s => s.amount))
+  return Math.max(0, cents(total) - cents(proxyFee(o, total)) - cents(paidOthers)) / 100
 }
 
 export function calc(o: Order, adminIds: Set<string>) {

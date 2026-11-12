@@ -43,6 +43,8 @@ export const users = pgTable(
     failedAttempts: integer('failed_attempts').notNull().default(0),
     lockedUntil: ts('locked_until'),
     active: boolean('active').notNull().default(true),
+    /** 销售暂停接单（封号或私事）：头像变灰，其他销售可以替他录单 */
+    pausedAt: ts('paused_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [uniqueIndex('users_account_idx').on(t.account)],
@@ -86,6 +88,7 @@ export const channels = pgTable(
       .notNull()
       .references(() => users.id),
     note: text('note').notNull().default(''),
+    settlementMode: text('settlement_mode').$type<'standard' | 'weekly'>().notNull().default('standard'),
     active: boolean('active').notNull().default(true),
     avatar: text('avatar'),
     deletedAt: ts('deleted_at'),
@@ -131,11 +134,15 @@ export const orders = pgTable(
     writerPayPlan: text('writer_pay_plan').$type<WriterPayPlan>().notNull().default('full'),
     graduatedAt: ts('graduated_at'),
     type: text('type').notNull().default(''),
+    expectedDeposit: money('expected_deposit'),
     basePrice: money('base_price').notNull(),
     status: text('status').notNull(),
     note: text('note').notNull().default(''),
     salesMode: text('sales_mode').$type<SalesMode>().notNull().default('commission'),
     commissionRate: doublePrecision('commission_rate').notNull(),
+    /** 代录人：归属销售暂停时替他录单的销售；按实收的 proxyRate 从归属销售提成里分给他 */
+    proxyId: text('proxy_id').references(() => users.id),
+    proxyRate: doublePrecision('proxy_rate').notNull().default(0.05),
     /** 迁移时金额不明、需要老板补录的标记，例如「部分结算待核对」 */
     reviewFlag: text('review_flag'),
     paymentCheckedAt: ts('payment_checked_at'),
@@ -199,6 +206,7 @@ export const orderCosts = pgTable('order_costs', {
   orderId: text('order_id').notNull().references(() => orders.id),
   name: text('name').notNull(),
   contractor: text('contractor').notNull().default(''),
+  contractorId: text('contractor_id'),
   amount: money('amount').notNull(),
   date: date('date', { mode: 'string' }).notNull(),
   note: text('note').notNull().default(''),
@@ -758,9 +766,14 @@ export const materialFavorites = pgTable('work_material_favorites', {
   materialId: text('material_id').notNull().references(() => materials.id, { onDelete: 'cascade' }),
 }, t => [primaryKey({ columns: [t.userId, t.materialId] })])
 
+/** 奖惩（原复盘）：惩罚走写手回复、老板确认的流程；金额可空，空的就是只复盘不扣钱；奖励直接记完 */
 export const qualityReviews = pgTable('quality_reviews', {
   id: text('id').primaryKey(),
-  orderId: text('order_id').notNull().references(() => orders.id),
+  kind: text('kind').$type<'penalty' | 'reward'>().notNull().default('penalty'),
+  category: text('category').notNull().default(''),
+  amount: money('amount'),
+  /** 可不关联订单，比如提出新制度 */
+  orderId: text('order_id').references(() => orders.id),
   writerId: text('writer_id').notNull().references(() => users.id),
   creatorId: text('creator_id').notNull().references(() => users.id),
   title: text('title').notNull(),
@@ -773,9 +786,45 @@ export const qualityReviews = pgTable('quality_reviews', {
   createdAt: ts('created_at').notNull().defaultNow(),
   repliedAt: ts('replied_at'),
   confirmedAt: ts('confirmed_at'),
+  revokedAt: ts('revoked_at'),
+  revokedBy: text('revoked_by'),
+  revokeReason: text('revoke_reason').notNull().default(''),
+  /** 随写手工资一起结清的时间；结清后不能撤销 */
+  settledAt: ts('settled_at'),
+  settledBy: text('settled_by'),
 }, t => [index('quality_reviews_writer_status').on(t.writerId, t.status)])
 
 export const materialCategories = pgTable('work_material_categories', {
   kind: text('kind').$type<'case' | 'talk'>().notNull(),
   name: text('name').notNull(),
 }, t => [primaryKey({ columns: [t.kind, t.name] })])
+
+
+/** 外包往来独立记账；成本仍只在原订单中计算一次。 */
+export const contractors = pgTable('contractors', {
+  id: text('id').primaryKey(), name: text('name').notNull().unique(),
+  aliases: jsonb('aliases').$type<string[]>().notNull().default([]), avatar: text('avatar'),
+  note: text('note').notNull().default(''), active: boolean('active').notNull().default(true),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+export const contractorPayments = pgTable('contractor_payments', {
+  id: text('id').primaryKey(), contractorId: text('contractor_id').notNull().references(() => contractors.id),
+  amount: money('amount').notNull(), date: date('date', { mode: 'string' }).notNull(),
+  note: text('note').notNull(), by: text('by').notNull().references(() => users.id),
+  at: ts('at').notNull().defaultNow(), revokedAt: ts('revoked_at'), revokeReason: text('revoke_reason'),
+})
+
+/** 意向单与正式订单分开；未转单不进入业绩、收款和工资。 */
+export const inquiries = pgTable('inquiries', {
+ id: text('id').primaryKey(), title: text('title').notNull(), ownerId: text('owner_id').notNull().references(() => users.id),
+ channelId: text('channel_id').references(() => channels.id), quote: money('quote'), note: text('note').notNull().default(''),
+ status: text('status').notNull().default('active'), orderId: text('order_id').references(() => orders.id),
+ updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
+/** 专用只读令牌，不能作为网页会话用于写接口。 */
+export const agentTokens = pgTable('agent_tokens', {
+ id: text('id').primaryKey(), hash: text('hash').notNull().unique(), userId: text('user_id').notNull().references(() => users.id),
+ name: text('name').notNull(), scopes: jsonb('scopes').$type<('orders'|'income')[]>().notNull(),
+ expiresAt: ts('expires_at').notNull(), revokedAt: ts('revoked_at'), createdAt: ts('created_at').notNull().defaultNow(),
+})
